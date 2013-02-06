@@ -1,0 +1,16 @@
+Description: Generate the API reference in text format, too.
+Author: Peter Pentchev <roam@ringlet.net>
+Forwarded: not yet
+Last-Update: 2013-02-06
+
+--- a/lib/Makefile.am
++++ b/lib/Makefile.am
+@@ -72,4 +72,8 @@
+                 *.c \
+                 libwebsockets.h \
+ 			> ../libwebsockets-api-doc.html
++	 ../scripts/kernel-doc -text \
++                *.c \
++                libwebsockets.h \
++			> ../libwebsockets-api-doc.txt
+ 

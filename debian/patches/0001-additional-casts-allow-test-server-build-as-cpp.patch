@@ -1,0 +1,78 @@
+From 36eb70d7a97f1e2acbfc16e4d9eb9f3bc9c8bf72 Mon Sep 17 00:00:00 2001
+From: Andy Green <andy.green@linaro.org>
+Date: Fri, 1 Feb 2013 08:42:15 +0800
+Subject: [PATCH 01/18] additional casts allow test server build as cpp
+
+With these explicit casts that are not needed in C, it's possible to build
+the test server using g++ like this, after building and installing the
+library.
+
+g++ -DINSTALL_DATADIR=\"/usr/share\" -ocpptest test.cpp -lwebsockets
+
+Add a small documentation to README.coding
+
+Signed-off-by: Andy Green <andy.green@linaro.org>
+---
+ README.coding             |   15 +++++++++++++++
+ test-server/test-server.c |    8 ++++----
+ 2 files changed, 19 insertions(+), 4 deletions(-)
+
+--- a/README.coding
++++ b/README.coding
+@@ -136,3 +136,18 @@
+ manage socket descriptors in other poll loops.
+ 
+ 
++Using with in c++ apps
++----------------------
++
++The library is ready for use by C++ apps.  You can get started quickly by
++copying the test server
++
++$ cp test-server/test-server.c test.cpp
++
++and building it in C++ like this
++
++$ g++ -DINSTALL_DATADIR=\"/usr/share\" -ocpptest test.cpp -lwebsockets
++
++INSTALL_DATADIR is only needed because the test server uses it as shipped, if
++you remove the references to it in your app you don't need to define it on
++the g++ line either.
+--- a/test-server/test-server.c
++++ b/test-server/test-server.c
+@@ -107,7 +107,7 @@
+ 	case LWS_CALLBACK_HTTP:
+ 
+ 		for (n = 0; n < (sizeof(whitelist) / sizeof(whitelist[0]) - 1); n++)
+-			if (in && strcmp(in, whitelist[n].urlpath) == 0)
++			if (in && strcmp((const char *)in, whitelist[n].urlpath) == 0)
+ 				break;
+ 
+ 		sprintf(buf, LOCAL_RESOURCE_PATH"%s", whitelist[n].urlpath);
+@@ -260,7 +260,7 @@
+ 	unsigned char buf[LWS_SEND_BUFFER_PRE_PADDING + 512 +
+ 						  LWS_SEND_BUFFER_POST_PADDING];
+ 	unsigned char *p = &buf[LWS_SEND_BUFFER_PRE_PADDING];
+-	struct per_session_data__dumb_increment *pss = user;
++	struct per_session_data__dumb_increment *pss = (struct per_session_data__dumb_increment *)user;
+ 
+ 	switch (reason) {
+ 
+@@ -288,7 +288,7 @@
+ //		fprintf(stderr, "rx %d\n", (int)len);
+ 		if (len < 6)
+ 			break;
+-		if (strcmp(in, "reset\n") == 0)
++		if (strcmp((const char *)in, "reset\n") == 0)
+ 			pss->number = 0;
+ 		break;
+ 	/*
+@@ -337,7 +337,7 @@
+ 					       void *user, void *in, size_t len)
+ {
+ 	int n;
+-	struct per_session_data__lws_mirror *pss = user;
++	struct per_session_data__lws_mirror *pss = (struct per_session_data__lws_mirror *)user;
+ 
+ 	switch (reason) {
+ 
