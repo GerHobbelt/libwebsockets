@@ -3,3 +3,4 @@
 0006-improve-test-server-poll-loop-docs.patch
 01-spelling.patch
 02-api-reference.patch
+03-path-max.patch

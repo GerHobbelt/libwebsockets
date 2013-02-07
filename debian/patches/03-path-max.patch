@@ -1,0 +1,67 @@
+Description: Avoid PATH_MAX, dynamically allocate memory.
+ On some systems (e.g. Debian GNU/Hurd) there is no definition of
+ PATH_MAX at all.  By allocating the u.http.filepath member dynamically
+ we also save some space in the libwebsocket structure.
+Author: Peter Pentchev <roam@ringlet.net>
+Forwarded: not yet
+Last update: 2013-02-07
+
+--- a/lib/private-libwebsockets.h
++++ b/lib/private-libwebsockets.h
+@@ -278,7 +278,7 @@
+  */
+ 
+ struct _lws_http_mode_related {
+-	char filepath[PATH_MAX];
++	char *filepath;
+ 	unsigned long filepos;
+ 	unsigned long filelen;
+ };
+--- a/lib/libwebsockets.c
++++ b/lib/libwebsockets.c
+@@ -366,6 +366,9 @@
+ 	if (wsi->protocol && wsi->protocol->per_session_data_size && wsi->user_space) /* user code may own */
+ 		free(wsi->user_space);
+ 
++	if (wsi->mode == LWS_CONNMODE_HTTP_SERVING && wsi->u.http.filepath)
++		free(wsi->u.http.filepath);
++
+ 	free(wsi);
+ }
+ 
+--- a/lib/output.c
++++ b/lib/output.c
+@@ -497,14 +497,31 @@
+ 			struct libwebsocket *wsi, const char *file,
+ 						       const char *content_type)
+ {
++	size_t len;
+ 	int fd;
+ 	struct stat stat_buf;
+ 	char buf[1400];
+ 	char *p = buf;
+ 	int n, m;
+ 
+-	strncpy(wsi->u.http.filepath, file, sizeof wsi->u.http.filepath);
+-	wsi->u.http.filepath[sizeof(wsi->u.http.filepath) - 1] = '\0';
++	if (wsi->u.http.filepath) {
++		free(wsi->u.http.filepath);
++		wsi->u.http.filepath = NULL;
++	}
++	len = strlen(file) + 1;
++	wsi->u.http.filepath = malloc(len);
++	if (wsi->u.http.filepath == NULL) {
++		p += sprintf(p, "HTTP/1.0 400 Bad\x0d\x0a"
++			"Server: libwebsockets\x0d\x0a"
++			"\x0d\x0a"
++		);
++		libwebsocket_write(wsi, (unsigned char *)buf, p - buf,
++								LWS_WRITE_HTTP);
++
++		return -1;
++	}
++	strncpy(wsi->u.http.filepath, file, len);
++	wsi->u.http.filepath[len - 1] = '\0';
+ 
+ #ifdef WIN32
+ 	fd = open(wsi->u.http.filepath, O_RDONLY | _O_BINARY);
