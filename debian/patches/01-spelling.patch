@@ -1,6 +1,6 @@
 Description: Fix a spelling error (connnection).
 Author: Peter Pentchev <roam@ringlet.net>
-Forwarded: not yet
+Forwarded: http://libwebsockets.org/trac/ticket/8
 Last-Update: 2013-02-06
 
 --- a/test-server/test-ping.c

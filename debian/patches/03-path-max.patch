@@ -3,7 +3,7 @@ Description: Avoid PATH_MAX, dynamically allocate memory.
  PATH_MAX at all.  By allocating the u.http.filepath member dynamically
  we also save some space in the libwebsocket structure.
 Author: Peter Pentchev <roam@ringlet.net>
-Forwarded: not yet
+Forwarded: http://libwebsockets.org/trac/ticket/8
 Last update: 2013-02-07
 
 --- a/lib/private-libwebsockets.h
