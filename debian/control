@@ -5,8 +5,8 @@ Maintainer: Peter Pentchev <roam@ringlet.net>
 Build-Depends: debhelper (>> 9), dh-autoreconf, libssl-dev, openssl, zlib1g-dev
 Standards-Version: 3.9.4
 Homepage: http://www.libwebsockets.org/
-#Vcs-Git: git://gitorious.org/libwebsockets/libwebsockets.git -b debian
-#Vcs-Browser: http://gitorious.org/libwebsockets/libwebsockets
+Vcs-Git: git://gitorious.org/libwebsockets/libwebsockets.git -b debian
+Vcs-Browser: http://gitorious.org/libwebsockets/libwebsockets
 
 Package: libwebsockets2
 Architecture: any
