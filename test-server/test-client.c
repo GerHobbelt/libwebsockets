@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <string.h>
+#include <signal.h>
 
 #include "../lib/libwebsockets.h"
 
@@ -32,6 +33,8 @@ static int was_closed;
 static int deny_deflate;
 static int deny_mux;
 static struct libwebsocket *wsi_mirror;
+static int mirror_lifetime = 0;
+static int force_exit = 0;
 
 /*
  * This demo shows how to connect multiple websockets simultaneously to a
@@ -102,7 +105,7 @@ callback_dumb_increment(struct libwebsocket_context *this,
 
 
 static int
-callback_lws_mirror(struct libwebsocket_context *this,
+callback_lws_mirror(struct libwebsocket_context *context,
 			struct libwebsocket *wsi,
 			enum libwebsocket_callback_reasons reason,
 					       void *user, void *in, size_t len)
@@ -126,7 +129,7 @@ callback_lws_mirror(struct libwebsocket_context *this,
 		 * LWS_CALLBACK_CLIENT_WRITEABLE will come next service
 		 */
 
-		libwebsocket_callback_on_writable(this, wsi);
+		libwebsocket_callback_on_writable(context, wsi);
 		break;
 
 	case LWS_CALLBACK_CLIENT_RECEIVE:
@@ -146,9 +149,13 @@ callback_lws_mirror(struct libwebsocket_context *this,
 		libwebsocket_write(wsi,
 		   &buf[LWS_SEND_BUFFER_PRE_PADDING], l, opts | LWS_WRITE_TEXT);
 
-		/* get notified as soon as we can write again */
-
-		libwebsocket_callback_on_writable(this, wsi);
+		mirror_lifetime--;
+		if (!mirror_lifetime) {
+			fprintf(stderr, "closing mirror session\n");
+			return -1;
+		} else
+			/* get notified as soon as we can write again */
+			libwebsocket_callback_on_writable(context, wsi);
 		break;
 
 	default:
@@ -166,18 +173,21 @@ static struct libwebsocket_protocols protocols[] = {
 		"dumb-increment-protocol",
 		callback_dumb_increment,
 		0,
+		20,
 	},
 	{
 		"lws-mirror-protocol",
 		callback_lws_mirror,
 		0,
+		128,
 	},
-	{  /* end of list */
-		NULL,
-		NULL,
-		0
-	}
+	{ NULL, NULL, 0, 0 } /* end */
 };
+
+void sighandler(int sig)
+{
+	force_exit = 1;
+}
 
 static struct option options[] = {
 	{ "help",	no_argument,		NULL, 'h' },
@@ -195,14 +205,17 @@ static struct option options[] = {
 int main(int argc, char **argv)
 {
 	int n = 0;
+	int ret = 0;
 	int port = 7681;
 	int use_ssl = 0;
 	struct libwebsocket_context *context;
 	const char *address;
 	struct libwebsocket *wsi_dumb;
 	int ietf_version = -1; /* latest */
-	int mirror_lifetime = 0;
 	int longlived = 0;
+	struct lws_context_creation_info info;
+
+	memset(&info, 0, sizeof info);
 
 	fprintf(stderr, "libwebsockets test client\n"
 			"(C) Copyright 2010-2013 Andy Green <andy@warmcat.com> "
@@ -245,6 +258,8 @@ int main(int argc, char **argv)
 	if (optind >= argc)
 		goto usage;
 
+	signal(SIGINT, sighandler);
+
 	address = argv[optind];
 
 	/*
@@ -255,14 +270,15 @@ int main(int argc, char **argv)
 	 * For this client-only demo, we tell it to not listen on any port.
 	 */
 
-	context = libwebsocket_create_context(CONTEXT_PORT_NO_LISTEN, NULL,
-				protocols,
+	info.port = CONTEXT_PORT_NO_LISTEN;
+	info.protocols = protocols;
 #ifndef LWS_NO_EXTENSIONS
-				libwebsocket_internal_extensions,
-#else
-				NULL,
+	info.extensions = libwebsocket_get_internal_extensions();
 #endif
-				NULL, NULL, NULL, -1, -1, 0, NULL);
+	info.gid = -1;
+	info.uid = -1;
+
+	context = libwebsocket_create_context(&info);
 	if (context == NULL) {
 		fprintf(stderr, "Creating libwebsocket context failed\n");
 		return 1;
@@ -276,7 +292,8 @@ int main(int argc, char **argv)
 
 	if (wsi_dumb == NULL) {
 		fprintf(stderr, "libwebsocket dumb connect failed\n");
-		return -1;
+		ret = 1;
+		goto bail;
 	}
 
 	fprintf(stderr, "Websocket connections opened\n");
@@ -287,57 +304,51 @@ int main(int argc, char **argv)
 	 */
 
 	n = 0;
-	while (n >= 0 && !was_closed) {
-		n = libwebsocket_service(context, 1000);
+	while (n >= 0 && !was_closed && !force_exit) {
+		n = libwebsocket_service(context, 10);
 
 		if (n < 0)
 			continue;
 
+		if (wsi_mirror)
+			continue;
+
+		/* create a client websocket using mirror protocol */
+
+		wsi_mirror = libwebsocket_client_connect(context,
+			address, port, use_ssl,  "/",
+			argv[optind], argv[optind],
+			protocols[PROTOCOL_LWS_MIRROR].name, ietf_version);
+
 		if (wsi_mirror == NULL) {
-
-			/* create a client websocket using mirror protocol */
-
-			wsi_mirror = libwebsocket_client_connect(context,
-				address, port, use_ssl,  "/",
-				argv[optind], argv[optind],
-				protocols[PROTOCOL_LWS_MIRROR].name,
-								 ietf_version);
-
-			if (wsi_mirror == NULL) {
-				fprintf(stderr, "libwebsocket "
-						      "dumb connect failed\n");
-				return -1;
-			}
-
-			mirror_lifetime = 10 + (random() & 1023);
-			/* useful to test single connection stability */
-			if (longlived)
-				mirror_lifetime += 50000;
-
-			fprintf(stderr, "opened mirror connection with "
-					     "%d lifetime\n", mirror_lifetime);
-
-		} else {
-
-			mirror_lifetime--;
-			if (mirror_lifetime == 0) {
-				fprintf(stderr, "closing mirror session\n");
-				libwebsocket_close_and_free_session(context,
-					wsi_mirror, LWS_CLOSE_STATUS_GOINGAWAY);
-
-				/*
-				 * wsi_mirror will get set to NULL in
-				 * callback when close completes
-				 */
-			}
+			fprintf(stderr, "libwebsocket "
+					      "dumb connect failed\n");
+			ret = 1;
+			goto bail;
 		}
+
+		mirror_lifetime = 10 + (random() & 1023);
+		/* useful to test single connection stability */
+		if (longlived)
+			mirror_lifetime += 50000;
+
+		fprintf(stderr, "opened mirror connection with "
+				     "%d lifetime\n", mirror_lifetime);
+
+		/*
+		 * mirror_lifetime is decremented each send, when it reaches
+		 * zero the connection is closed in the send callback.
+		 * When the close callback comes, wsi_mirror is set to NULL
+		 * so a new connection will be opened
+		 */
 	}
 
+bail:
 	fprintf(stderr, "Exiting\n");
 
 	libwebsocket_context_destroy(context);
 
-	return 0;
+	return ret;
 
 usage:
 	fprintf(stderr, "Usage: libwebsockets-test-client "

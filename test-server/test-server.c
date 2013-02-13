@@ -18,6 +18,9 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
  *  MA  02110-1301  USA
  */
+#ifdef CMAKE_BUILD
+#include "lws_config.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,7 +29,23 @@
 #include <string.h>
 #include <sys/time.h>
 #include <assert.h>
+#ifdef WIN32
+
+#ifdef EXTERNAL_POLL
+	#ifndef WIN32_LEAN_AND_MEAN
+	#define WIN32_LEAN_AND_MEAN
+	#endif
+	#include <winsock2.h>
+	#include <ws2tcpip.h>
+	#include <stddef.h>
+
+	#include "websock-w32.h"
+#endif
+
+#else // NOT WIN32
 #include <syslog.h>
+#endif
+
 #include <signal.h>
 
 #include "../lib/libwebsockets.h"
@@ -107,13 +126,13 @@ static int callback_http(struct libwebsocket_context *context,
 	case LWS_CALLBACK_HTTP:
 
 		for (n = 0; n < (sizeof(whitelist) / sizeof(whitelist[0]) - 1); n++)
-			if (in && strcmp(in, whitelist[n].urlpath) == 0)
+			if (in && strcmp((const char *)in, whitelist[n].urlpath) == 0)
 				break;
 
 		sprintf(buf, LOCAL_RESOURCE_PATH"%s", whitelist[n].urlpath);
 
 		if (libwebsockets_serve_http_file(context, wsi, buf, whitelist[n].mimetype))
-			lwsl_err("Failed to send HTTP file\n");
+			return 1; /* through completion or error, close the socket */
 
 		/*
 		 * notice that the sending of the file completes asynchronously,
@@ -198,7 +217,7 @@ static int callback_http(struct libwebsocket_context *context,
  */
 
 static void
-dump_handshake_info(struct lws_tokens *lwst)
+dump_handshake_info(struct libwebsocket *wsi)
 {
 	int n;
 	static const char *token_names[WSI_TOKEN_COUNT] = {
@@ -227,12 +246,15 @@ dump_handshake_info(struct lws_tokens *lwst)
 		/*[WSI_TOKEN_HTTP]		=*/ "Http",
 		/*[WSI_TOKEN_MUXURL]	=*/ "MuxURL",
 	};
+	char buf[256];
 
 	for (n = 0; n < WSI_TOKEN_COUNT; n++) {
-		if (lwst[n].token == NULL)
+		if (!lws_hdr_total_length(wsi, n))
 			continue;
 
-		fprintf(stderr, "    %s = %s\n", token_names[n], lwst[n].token);
+		lws_hdr_copy(wsi, buf, sizeof buf, n);
+
+		fprintf(stderr, "    %s = %s\n", token_names[n], buf);
 	}
 }
 
@@ -260,7 +282,7 @@ callback_dumb_increment(struct libwebsocket_context *context,
 	unsigned char buf[LWS_SEND_BUFFER_PRE_PADDING + 512 +
 						  LWS_SEND_BUFFER_POST_PADDING];
 	unsigned char *p = &buf[LWS_SEND_BUFFER_PRE_PADDING];
-	struct per_session_data__dumb_increment *pss = user;
+	struct per_session_data__dumb_increment *pss = (struct per_session_data__dumb_increment *)user;
 
 	switch (reason) {
 
@@ -279,8 +301,7 @@ callback_dumb_increment(struct libwebsocket_context *context,
 		}
 		if (close_testing && pss->number == 50) {
 			lwsl_info("close tesing limit, closing\n");
-			libwebsocket_close_and_free_session(context, wsi,
-						       LWS_CLOSE_STATUS_NORMAL);
+			return -1;
 		}
 		break;
 
@@ -288,7 +309,7 @@ callback_dumb_increment(struct libwebsocket_context *context,
 //		fprintf(stderr, "rx %d\n", (int)len);
 		if (len < 6)
 			break;
-		if (strcmp(in, "reset\n") == 0)
+		if (strcmp((const char *)in, "reset\n") == 0)
 			pss->number = 0;
 		break;
 	/*
@@ -298,7 +319,7 @@ callback_dumb_increment(struct libwebsocket_context *context,
 	 */
 
 	case LWS_CALLBACK_FILTER_PROTOCOL_CONNECTION:
-		dump_handshake_info((struct lws_tokens *)(long)user);
+		dump_handshake_info(wsi);
 		/* you could return non-zero here and kill the connection */
 		break;
 
@@ -337,7 +358,7 @@ callback_lws_mirror(struct libwebsocket_context *context,
 					       void *user, void *in, size_t len)
 {
 	int n;
-	struct per_session_data__lws_mirror *pss = user;
+	struct per_session_data__lws_mirror *pss = (struct per_session_data__lws_mirror *)user;
 
 	switch (reason) {
 
@@ -346,6 +367,13 @@ callback_lws_mirror(struct libwebsocket_context *context,
 						 "LWS_CALLBACK_ESTABLISHED\n");
 		pss->ringbuffer_tail = ringbuffer_head;
 		pss->wsi = wsi;
+		break;
+
+	case LWS_CALLBACK_PROTOCOL_DESTROY:
+		lwsl_notice("mirror protocol cleaning up\n");
+		for (n = 0; n < sizeof ringbuffer / sizeof ringbuffer[0]; n++)
+			if (ringbuffer[n].payload)
+				free(ringbuffer[n].payload);
 		break;
 
 	case LWS_CALLBACK_SERVER_WRITEABLE:
@@ -428,7 +456,7 @@ done:
 	 */
 
 	case LWS_CALLBACK_FILTER_PROTOCOL_CONNECTION:
-		dump_handshake_info((struct lws_tokens *)(long)user);
+		dump_handshake_info(wsi);
 		/* you could return non-zero here and kill the connection */
 		break;
 
@@ -448,21 +476,22 @@ static struct libwebsocket_protocols protocols[] = {
 	{
 		"http-only",		/* name */
 		callback_http,		/* callback */
-		0			/* per_session_data_size */
+		0,			/* per_session_data_size */
+		0,			/* max frame size / rx buffer */
 	},
 	{
 		"dumb-increment-protocol",
 		callback_dumb_increment,
 		sizeof(struct per_session_data__dumb_increment),
+		10,
 	},
 	{
 		"lws-mirror-protocol",
 		callback_lws_mirror,
-		sizeof(struct per_session_data__lws_mirror)
+		sizeof(struct per_session_data__lws_mirror),
+		128,
 	},
-	{
-		NULL, NULL, 0		/* End of list */
-	}
+	{ NULL, NULL, 0, 0 } /* terminator */
 };
 
 void sighandler(int sig)
@@ -486,23 +515,24 @@ static struct option options[] = {
 int main(int argc, char **argv)
 {
 	int n = 0;
-	const char *cert_path =
-			    LOCAL_RESOURCE_PATH"/libwebsockets-test-server.pem";
-	const char *key_path =
-			LOCAL_RESOURCE_PATH"/libwebsockets-test-server.key.pem";
-	int port = 7681;
 	int use_ssl = 0;
 	struct libwebsocket_context *context;
 	int opts = 0;
 	char interface_name[128] = "";
-	const char *interface = NULL;
+	const char *iface = NULL;
+#ifndef WIN32
 	int syslog_options = LOG_PID | LOG_PERROR;
+#endif
 	unsigned int oldus = 0;
+	struct lws_context_creation_info info;
 
 	int debug_level = 7;
 #ifndef LWS_NO_DAEMONIZE
 	int daemonize = 0;
 #endif
+
+	memset(&info, 0, sizeof info);
+	info.port = 7681;
 
 	while (n >= 0) {
 		n = getopt_long(argc, argv, "ci:hsp:d:D", options, NULL);
@@ -512,7 +542,9 @@ int main(int argc, char **argv)
 #ifndef LWS_NO_DAEMONIZE
 		case 'D':
 			daemonize = 1;
+			#ifndef WIN32
 			syslog_options &= ~LOG_PERROR;
+			#endif
 			break;
 #endif
 		case 'd':
@@ -522,12 +554,12 @@ int main(int argc, char **argv)
 			use_ssl = 1;
 			break;
 		case 'p':
-			port = atoi(optarg);
+			info.port = atoi(optarg);
 			break;
 		case 'i':
 			strncpy(interface_name, optarg, sizeof interface_name);
 			interface_name[(sizeof interface_name) - 1] = '\0';
-			interface = interface_name;
+			iface = interface_name;
 			break;
 		case 'c':
 			close_testing = 1;
@@ -543,7 +575,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-#ifndef LWS_NO_DAEMONIZE
+#if !defined(LWS_NO_DAEMONIZE) && !defined(WIN32)
 	/* 
 	 * normally lock path would be /var/lock/lwsts or similar, to
 	 * simplify getting started without having to take care about
@@ -557,9 +589,11 @@ int main(int argc, char **argv)
 
 	signal(SIGINT, sighandler);
 
+#ifndef WIN32
 	/* we will only try to log things according to our debug_level */
 	setlogmask(LOG_UPTO (LOG_DEBUG));
 	openlog("lwsts", syslog_options, LOG_DAEMON);
+#endif
 
 	/* tell the library what debug level to emit and to send it to syslog */
 	lws_set_log_level(debug_level, lwsl_emit_syslog);
@@ -567,8 +601,6 @@ int main(int argc, char **argv)
 	lwsl_notice("libwebsockets test server - "
 			"(C) Copyright 2010-2013 Andy Green <andy@warmcat.com> - "
 						    "licensed under LGPL2.1\n");
-	if (!use_ssl)
-		cert_path = key_path = NULL;
 #ifdef EXTERNAL_POLL
 	max_poll_elements = getdtablesize();
 	pollfds = malloc(max_poll_elements * sizeof (struct pollfd));
@@ -579,13 +611,23 @@ int main(int argc, char **argv)
 	}
 #endif
 
-	context = libwebsocket_create_context(port, interface, protocols,
+	info.iface = iface;
+	info.protocols = protocols;
 #ifndef LWS_NO_EXTENSIONS
-				libwebsocket_internal_extensions,
-#else
-				NULL,
+	info.extensions = libwebsocket_get_internal_extensions();
 #endif
-				cert_path, key_path, NULL, -1, -1, opts, NULL);
+	if (!use_ssl) {
+		info.ssl_cert_filepath = NULL;
+		info.ssl_private_key_filepath = NULL;
+	} else {
+		info.ssl_cert_filepath = LOCAL_RESOURCE_PATH"/libwebsockets-test-server.pem";
+		info.ssl_private_key_filepath = LOCAL_RESOURCE_PATH"/libwebsockets-test-server.key.pem";
+	}
+	info.gid = -1;
+	info.uid = -1;
+	info.options = opts;
+
+	context = libwebsocket_create_context(&info);
 	if (context == NULL) {
 		lwsl_err("libwebsocket init failed\n");
 		return -1;
@@ -608,16 +650,6 @@ int main(int argc, char **argv)
 			oldus = tv.tv_usec;
 		}
 
-		/*
-		 * This example server does not fork or create a thread for
-		 * websocket service, it all runs in this single loop.  So,
-		 * we have to give the websockets an opportunity to service
-		 * "manually".
-		 *
-		 * If no socket is needing service, the call below returns
-		 * immediately and quickly.  Negative return means we are
-		 * in process of closing
-		 */
 #ifdef EXTERNAL_POLL
 
 		/*
@@ -642,6 +674,15 @@ int main(int argc, char **argv)
 								  &pollfds[n]) < 0)
 						goto done;
 #else
+		/*
+		 * If libwebsockets sockets are all we care about,
+		 * you can use this api which takes care of the poll()
+		 * and looping through finding who needed service.
+		 *
+		 * If no socket needs service, it'll return anyway after
+		 * the number of ms in the second argument.
+		 */
+
 		n = libwebsocket_service(context, 50);
 #endif
 	}
@@ -654,7 +695,9 @@ done:
 
 	lwsl_notice("libwebsockets-test-server exited cleanly\n");
 
+#ifndef WIN32
 	closelog();
+#endif
 
 	return 0;
 }

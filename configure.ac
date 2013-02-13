@@ -2,10 +2,11 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.61])
-AC_INIT(libwebsockets, 1.1, andy@warmcat.com)
+AC_INIT(libwebsockets, 1.2, andy@warmcat.com, libwebsockets, http://libwebsockets.org)
 AC_CONFIG_SRCDIR([test-server/test-server.c])
 AC_CONFIG_HEADERS([config.h])
 
+: ${CFLAGS=""}
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AM_PROG_AR
 LT_INIT(shared)
@@ -17,6 +18,13 @@ AM_PROG_CC_C_O
 AC_PROG_INSTALL
 AC_PROG_MAKE_SET
 AC_CONFIG_MACRO_DIR([m4])
+
+applyhash='CFLAGS+= -DLWS_LIBRARY_VERSION=\"$(PACKAGE_VERSION)\" -DLWS_BUILD_HASH=\"${shell git log -n 1 --pretty=%h}\"'
+AC_SUBST([applyhash])
+AM_SUBST_NOTMAKE([applyhash])
+
+# Check for existance of the inline keyword.
+AC_C_INLINE
 
 #
 #
@@ -183,6 +191,18 @@ CFLAGS="$CFLAGS -DLWS_BUILTIN_GETIFADDRS"
 fi
 AM_CONDITIONAL(USE_BUILTIN_GETIFADDRS, test x$builtin_getifaddrs = xyes)
 
+# 
+#
+#
+AC_ARG_WITH(cyassl,
+ [  --with-cyassl  Use CyaSSL instead of OpenSSL ],
+ [ use_cyassl=yes
+ ])
+
+if test "x$use_cyassl" = "xyes" ; then                                     
+CFLAGS="$CFLAGS -DUSE_CYASSL -DLWS_OPENSSL_SUPPORT"
+fi
+AM_CONDITIONAL(USE_CYASSL, test x$use_cyassl = xyes)
 
 
 # Checks for header files.

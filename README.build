@@ -1,3 +1,12 @@
+Introduction
+------------
+Libwebsockets can be built using two different build systems
+autoconf or CMake. autoconf only works on Unix systems, or mingw/cygwin
+on Windows. CMake works differently and can generate platform specific
+project files for most popular IDEs and build systems.
+
+################################### Autoconf ###################################
+
 Building the library and test apps
 ----------------------------------
 
@@ -5,28 +14,42 @@ You need to regenerate the autotools and libtoolize stuff for your system
 
 $ ./autogen.sh
 
-Then for a Fedora x86_86 box, the following config line was
-needed:
+Then,
+
+------Fedora x86_64
 
  ./configure --prefix=/usr --libdir=/usr/lib64 --enable-openssl
 
-For Apple systems, Christopher Baker reported that this is needed
-(and I was told separately enabling openssl makes trouble somehow)
+------Apple
+
+Christopher Baker reported that this is needed
 
 ./configure CC="gcc -arch i386 -arch x86_64" CXX="g++ -arch i386 -arch
 x86_64" CPP="gcc -E" CXXCPP="g++ -E" --enable-nofork
 
-For mingw build, I did the following to get working build, ping test is
-disabled when building this way
+------mingw
+
+I did the following to get working build, ping test is disabled when
+building this way
 
 1) install mingw64_w32 compiler packages from Fedora
 2) additionally install mingw64-zlib package
 3) ./configure --prefix=/usr --enable-mingw --host=x86_64-w64-mingw32
 4) make
 
-For uClibc, you will likely need --enable-builtin-getifaddrs
+------MIPS cross-build using OpenWRT
 
-For cross-building, here's an example using the Linaro ARM toolchain
+ ./configure --prefix=/usr --without-extensions --host mips-openwrt-linux
+
+I did not try building the extensions since they need cross-zlib, but it
+should also be workable.
+
+------Other uClibc
+
+you may need --enable-builtin-getifaddrs if your toolchain
+doesn't have it - openWRT uclibc has it so you don't need this option.
+
+------ARM cross-build
 
 ./configure --prefix=/usr --host=arm-linux-gnueabi --without-client --without-extensions
 
@@ -49,6 +72,12 @@ Configure script options
 ------------------------
 
 There are several other possible configure options
+
+--enable-openssl	Builds in the SSL support
+
+--with-cyassl		Use cyassl instead of OpenSSL... you will need CyaSSL
+			to have been configured with --enable-opensslExtra
+\			when it was built.
 
 --enable-libcrypto	by default libwebsockets uses its own
 			built-in md5 and sha-1 implementation for
@@ -119,31 +148,19 @@ constrained, so you only need to take care about them if you want to tune them
 to the amount of memory available.
 
  - LWS_MAX_HEADER_NAME_LENGTH default 64: max characters in an HTTP header
-name that libwebsockets can cope with
+name that libwebsockets can cope with, if a header arrives bigger than this
+it's ignored until the next header is seen
 
- - LWS_MAX_HEADER_LEN default 4096: largest HTTP header value string length
-libwebsockets can cope with
+ - LWS_MAX_HEADER_LEN default 1024: allocated area to copy http headers that
+libwebsockets knows about into.  You only need to think about increasing this
+if your application might have monster length URLs for example, or some other
+header that lws cares about will be abnormally large (headers it does not
+know about are skipped).
 
- - LWS_INITIAL_HDR_ALLOC default 256: amount of memory to allocate initially,
-tradeoff between taking too much and needless realloc
-
- - LWS_ADDITIONAL_HDR_ALLOC default 64: how much to additionally realloc if
-the header value string keeps coming
-
- - MAX_USER_RX_BUFFER default 4096: max amount of user rx data to buffer at a
-time and pass to user callback LWS_CALLBACK_RECEIVE or
-LWS_CALLBACK_CLIENT_RECEIVE.  Large frames are passed to the user callback
-in chunks of this size.  Tradeoff between per-connection static memory
-allocation and if you expect to deal with large frames, how much you can
-see at once which can affect efficiency.
-
- - MAX_BROADCAST_PAYLOAD default 4096: largest amount of user tx data we can
-broadcast at a time
-
- - LWS_MAX_PROTOCOLS default 10: largest amount of different protocols the
+ - LWS_MAX_PROTOCOLS default 5: largest amount of different protocols the
 server can serve
 
- - LWS_MAX_EXTENSIONS_ACTIVE default 10: largest amount of extensions we can
+ - LWS_MAX_EXTENSIONS_ACTIVE default 3: largest amount of extensions we can
 choose to have active on one connection
 
  - SPEC_LATEST_SUPPORTED default 13: only change if you want to remove support
@@ -187,11 +204,22 @@ echo "262144" > /proc/sys/net/netfilter/nf_conntrack_max
 Memory efficiency
 -----------------
 
-Update at 35f332bb46464feb87eb
-
 Embedded server-only configuration without extensions (ie, no compression
 on websocket connections), but with full v13 websocket features and http
 server, built on ARM Cortex-A9:
+
+Update at 224149ai (2013-02-11)
+
+./configure --without-client --without-extensions --disable-debug --without-daemonize
+
+Context Creation, 1024 fd limit[2]: 17444 (incl. 12 bytes per fd)
+Per-connection [3]: 112 bytes, additional 1328 bytes only during headers
+
+.text	.rodata	.data	.bss
+11548	2736	288	4
+
+
+Update at 35f332bb46464feb87eb
 
 ./configure --without-client --without-extensions --disable-debug --enable-nofork --without-daemonize
 
@@ -237,3 +265,171 @@ and Ubuntu.
 
 [3] known headers are retained via additional mallocs for the lifetime of the
 connection
+
+
+#################################### CMake ####################################
+
+CMake is a multi-platform build tool that can generate build files for many
+different target platforms. See more info at http://www.cmake.org
+
+CMake also allows/recommends you to do "out of source"-builds, that is, 
+the build files are separated from your sources, so there is no need to 
+create elaborate clean scripts to get a clean source tree, instead you 
+simply remove your build directory.
+
+Libwebsockets has been tested to build successfully on the following platforms
+with SSL support (both OpenSSL/CyaSSL):
+
+- Windows
+- Linux (x86 and ARM)
+- OSX
+- NetBSD
+
+Building the library and test apps
+----------------------------------
+
+The project settings used by CMake to generate the platform specific build
+files is called CMakeLists.txt. CMake then uses one of its "Generators" to
+output a Visual Studio project or Make file for instance. To see a list of
+the available generators for your platform, simply run the "cmake" command.
+
+Note that by default OpenSSL will be linked, if you don't want SSL support
+see below on how to toggle compile options.
+
+Building on Unix:
+-----------------
+
+1. Install CMake 2.6 or greater: http://cmake.org/cmake/resources/software.html
+   (Most Unix distributions comes with a packaged version also)
+
+2. Install OpenSSL.
+
+3. Generate the build files (default is Make files):
+
+	cd /path/to/src
+	mkdir build
+	cd build
+	cmake ..
+
+	(NOTE: The build/ directory can have any name and be located anywhere
+	 on your filesystem, and that the argument ".." given to cmake is simply
+	 the source directory of libwebsockets containing the CMakeLists.txt project
+	 file. All examples in this file assumes you use "..")
+
+4. Finally you can build using the generated Makefile:
+
+	make
+
+Building on Windows (Visual Studio)
+-----------------------------------
+1. Install CMake 2.6 or greater: http://cmake.org/cmake/resources/software.html
+
+2. Install OpenSSL binaries. http://www.openssl.org/related/binaries.html
+   (Preferably in the default location to make it easier for CMake to find them)
+
+3. Generate the Visual studio project by opening the Visual Studio cmd prompt:
+
+   cd <path to src>
+   md build
+   cd build
+   cmake -G "Visual Studio 10" ..
+
+   (NOTE: There is also a cmake-gui available on Windows if you prefer that)
+
+4. Now you should have a generated Visual Studio Solution in  your
+   <path to src>/build directory, which can be used to build.
+
+Setting compile options
+-----------------------
+
+To set compile time flags you can either use one of the CMake gui applications
+or do it via command line.
+
+Command line
+------------
+To list avaialable options (ommit the H if you don't want the help text):
+
+	cmake -LH ..
+
+Then to set an option and build (for example turn off SSL support):
+
+	cmake -DWITH_SSL=0 ..
+or
+	cmake -DWITH_SSL:BOOL=OFF ..
+
+Unix GUI
+--------
+If you have a curses enabled build you simply type:
+(not all packages include this, my debian install does not for example).
+	
+	ccmake
+
+Windows GUI
+-----------
+On windows CMake comes with a gui application:
+	Start -> Programs -> CMake -> CMake (cmake-gui)
+
+CyaSSL replacement for OpenSSL
+------------------------------
+CyaSSL is a lightweight SSL library targeted at embedded system:
+http://www.yassl.com/yaSSL/Products-cyassl.html
+
+It contains a OpenSSL compatability layer which makes it possible to pretty
+much link to it instead of OpenSSL, giving a much smaller footprint.
+
+NOTE: At the time of writing this the current release of CyaSSL contains a 
+crash bug due to some APIs libwebsocket uses. To be able to use this you will
+need to use the current HEAD in their official repository:
+	https://github.com/cyassl/cyassl
+
+NOTE: cyassl needs to be compiled using the --enable-opensslExtra flag for
+this to work.
+
+Compiling libwebsockets with CyaSSL
+-----------------------------------
+
+cmake -DUSE_CYASSL=1 
+	  -DCYASSL_INCLUDE_DIRS=/path/to/cyassl 
+	  -DCYASSL_LIB=/path/to/cyassl/cyassl.a ..
+
+NOTE: On windows use the .lib file extension for CYASSL_LIB instead.
+
+Cross compiling
+---------------
+To enable cross compiling libwebsockets using CMake you need to create
+a "Toolchain file" that you supply to CMake when generating your build files.
+CMake will then use the cross compilers and build paths specified in this file
+to look for dependencies and such.
+
+Below is an example of how one of these files might look like:
+
+	#
+	# CMake Toolchain file for crosscompiling on ARM.
+	#
+	# This can be used when running cmake in the following way:
+	#  cd build/
+	#  cmake .. -DCMAKE_TOOLCHAIN_FILE=/path/to/this/file/TC_arm-linux-gcc.cmake
+	#
+
+	set(CROSS_PATH /path/to/cross_environment/uClibc)
+
+	# Target operating system name.
+	set(CMAKE_SYSTEM_NAME Linux)
+
+	# Name of C compiler.
+	set(CMAKE_C_COMPILER "${CROSS_PATH}/bin/arm-linux-uclibc-gcc")
+	set(CMAKE_CXX_COMPILER "${CROSS_PATH}/bin/arm-linux-uclibc-g++")
+
+	# Where to look for the target environment. (More paths can be added here)
+	set(CMAKE_FIND_ROOT_PATH "${CROSS_PATH}")
+
+	# Adjust the default behavior of the FIND_XXX() commands:
+	# search programs in the host environment only.
+	set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+
+	# Search headers and libraries in the target environment only.
+	set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+	set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+
+Additional information on cross compilation with CMake:
+	http://www.vtk.org/Wiki/CMake_Cross_Compiling

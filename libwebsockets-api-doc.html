@@ -85,18 +85,22 @@ protocol supported, or the specific protocol ordinal
 This function creates a connection to a remote server
 </blockquote>
 <hr>
-<h2>libwebsockets_hangup_on_client - Server calls to terminate client connection</h2>
-<i>void</i>
-<b>libwebsockets_hangup_on_client</b>
-(<i>struct libwebsocket_context *</i> <b>context</b>,
-<i>int</i> <b>fd</b>)
+<h2>lws_get_library_version - </h2>
+<i>const char *</i>
+<b>lws_get_library_version</b>
+(<i></i> <b>void</b>)
 <h3>Arguments</h3>
 <dl>
-<dt><b>context</b>
-<dd>libwebsockets context
-<dt><b>fd</b>
-<dd>Connection socket descriptor
+<dt><b>void</b>
+<dd>no arguments
 </dl>
+<h3>Description</h3>
+<blockquote>
+<p>
+returns a const char * to a string like "1.1 178d78c"
+representing the library version followed by the git head hash it
+was built from
+</blockquote>
 <hr>
 <h2>libwebsockets_get_peer_addresses - Get client address information</h2>
 <i>void</i>
@@ -149,7 +153,8 @@ happened.
 <h3>Description</h3>
 <blockquote>
 This function takes a pollfd that has POLLIN or POLLOUT activity and
-services it according to the state of the associated struct libwebsocket.
+services it according to the state of the associated
+struct libwebsocket.
 <p>
 The one call deals with all "service" that might happen on a socket
 including listen accepts, http files as well as websocket protocol.
@@ -171,7 +176,7 @@ context.  After calling this, any further use of the context is
 undefined.
 </blockquote>
 <hr>
-<h2>libwebsocket_context_user - get the user data associated with the whole context</h2>
+<h2>libwebsocket_context_user - get the user data associated with the context</h2>
 <i>LWS_EXTERN void *</i>
 <b>libwebsocket_context_user</b>
 (<i>struct libwebsocket_context *</i> <b>context</b>)
@@ -327,57 +332,15 @@ has been created.
 <h2>libwebsocket_create_context - Create the websocket handler</h2>
 <i>struct libwebsocket_context *</i>
 <b>libwebsocket_create_context</b>
-(<i>int</i> <b>port</b>,
-<i>const char *</i> <b>interf</b>,
-<i>struct libwebsocket_protocols *</i> <b>protocols</b>,
-<i>struct libwebsocket_extension *</i> <b>extensions</b>,
-<i>const char *</i> <b>ssl_cert_filepath</b>,
-<i>const char *</i> <b>ssl_private_key_filepath</b>,
-<i>const char *</i> <b>ssl_ca_filepath</b>,
-<i>int</i> <b>gid</b>,
-<i>int</i> <b>uid</b>,
-<i>unsigned int</i> <b>options</b>,
-<i>void *</i> <b>user</b>)
+(<i>struct lws_context_creation_info *</i> <b>info</b>)
 <h3>Arguments</h3>
 <dl>
-<dt><b>port</b>
-<dd>Port to listen on... you can use 0 to suppress listening on
-any port, that's what you want if you are not running a
-websocket server at all but just using it as a client
-<dt><b>interf</b>
-<dd>NULL to bind the listen socket to all interfaces, or the
-interface name, eg, "eth2"
-<dt><b>protocols</b>
-<dd>Array of structures listing supported protocols and a protocol-
-specific callback for each one.  The list is ended with an
-entry that has a NULL callback pointer.
-It's not const because we write the owning_server member
-<dt><b>extensions</b>
-<dd>NULL or array of libwebsocket_extension structs listing the
-extensions this context supports.  If you configured with
---without-extensions, you should give NULL here.
-<dt><b>ssl_cert_filepath</b>
-<dd>If libwebsockets was compiled to use ssl, and you want
-to listen using SSL, set to the filepath to fetch the
-server cert from, otherwise NULL for unencrypted
-<dt><b>ssl_private_key_filepath</b>
-<dd>filepath to private key if wanting SSL mode,
-else ignored
-<dt><b>ssl_ca_filepath</b>
-<dd>CA certificate filepath or NULL
-<dt><b>gid</b>
-<dd>group id to change to after setting listen socket, or -1.
-<dt><b>uid</b>
-<dd>user id to change to after setting listen socket, or -1.
-<dt><b>options</b>
-<dd>0, or LWS_SERVER_OPTION_DEFEAT_CLIENT_MASK
-<dt><b>user</b>
-<dd>optional user pointer that can be recovered via the context
-pointer using libwebsocket_context_user 
+<dt><b>info</b>
+<dd>pointer to struct with parameters
 </dl>
 <h3>Description</h3>
 <blockquote>
-This function creates the listening socket and takes care
+This function creates the listening socket (if serving) and takes care
 of all initialization in one step.
 <p>
 After initialization, it returns a struct libwebsocket_context * that
@@ -423,7 +386,7 @@ this is how you can get a pointer to the active protocol if needed.
 <i>void</i>
 <b>lws_set_log_level</b>
 (<i>int</i> <b>level</b>,
-<i>void (*</i><b>log_emit_function</b>) <i>(int level, const char *line)</i>)
+<i>void (*</i><b>log_emit_function</b>) <i>(int level, 							      const char *line)</i>)
 <h3>Arguments</h3>
 <dl>
 <dt><b>level</b>
@@ -500,6 +463,11 @@ packet while not burdening the user code with any protocol knowledge.
 This function is intended to be called from the callback in response
 to http requests from the client.  It allows the callback to issue
 local files down the http link in a single step.
+<p>
+Returning &lt;0 indicates error and the wsi should be closed.  Returning
+&gt;0 indicates the file was completely sent and the wsi should be closed.
+==0 indicates the file transfer is started and needs more service later,
+the wsi should be left alone.
 </blockquote>
 <hr>
 <h2>lws_frame_is_binary - </h2>
@@ -587,6 +555,16 @@ an incoming client
 the request client connection has
 been unable to complete a handshake with the remote server
 </blockquote>
+<h3>LWS_CALLBACK_CLIENT_FILTER_PRE_ESTABLISH</h3>
+<blockquote>
+this is the last chance for the
+client user code to examine the http headers
+and decide to reject the connection.  If the
+content in the headers is interesting to the
+client (url, etc) it needs to copy it out at
+this point since it will be destroyed before
+the CLIENT_ESTABLISHED call
+</blockquote>
 <h3>LWS_CALLBACK_CLIENT_ESTABLISHED</h3>
 <blockquote>
 after your client connection completed
@@ -595,12 +573,6 @@ a handshake with the remote server
 <h3>LWS_CALLBACK_CLOSED</h3>
 <blockquote>
 when the websocket session ends
-</blockquote>
-<h3>LWS_CALLBACK_BROADCAST</h3>
-<blockquote>
-signal to send to client (you would use
-<b>libwebsocket_write</b> taking care about the
-special buffer requirements
 </blockquote>
 <h3>LWS_CALLBACK_RECEIVE</h3>
 <blockquote>
@@ -768,6 +740,18 @@ claim to support that extension by returning non-zero.  If
 unhandled, by default 0 will be returned and the extension
 support included in the header to the server.  Notice this
 callback comes to protocols[0].
+</blockquote>
+<h3>LWS_CALLBACK_PROTOCOL_INIT</h3>
+<blockquote>
+One-time call per protocol so it can
+do initial setup / allocations etc
+</blockquote>
+<h3>LWS_CALLBACK_PROTOCOL_DESTROY</h3>
+<blockquote>
+One-time call per protocol indicating
+this protocol won't get used at all after this callback, the
+context is getting destroyed.  Take the opportunity to
+deallocate everything that was allocated by the protocol.
 <p>
 The next four reasons are optional and only need taking care of if you
 will be integrating libwebsockets sockets into an external polling
@@ -908,6 +892,7 @@ set the lws_tokens token pointer to it.
 &nbsp; &nbsp; <i>const char *</i> <b>name</b>;<br>
 &nbsp; &nbsp; <i>callback_function *</i> <b>callback</b>;<br>
 &nbsp; &nbsp; <i>size_t</i> <b>per_session_data_size</b>;<br>
+&nbsp; &nbsp; <i>size_t</i> <b>rx_buffer_size</b>;<br>
 &nbsp; &nbsp; <i>struct libwebsocket_context *</i> <b>owning_server</b>;<br>
 &nbsp; &nbsp; <i>int</i> <b>protocol_index</b>;<br>
 };<br>
@@ -925,6 +910,15 @@ the protocol-specific callback
 this much memory allocated on connection establishment and
 freed on connection takedown.  A pointer to this per-connection
 allocation is passed into the callback in the 'user' parameter
+<dt><b>rx_buffer_size</b>
+<dd>if you want atomic frames delivered to the callback, you
+should set this to the size of the biggest legal frame that
+you support.  If the frame size is exceeded, there is no
+error, but the buffer will spill to the user callback when
+full, which you can detect by using
+<b>libwebsockets_remaining_packet_payload</b>.  Notice that you
+just talk about frame size here, the LWS_SEND_BUFFER_PRE_PADDING
+and post-padding are automatically also allocated on top.
 <dt><b>owning_server</b>
 <dd>the server init call fills in this opaque pointer when
 registering this protocol with the server.
@@ -956,8 +950,73 @@ allows as many protocols as you like to be handled by one server.
 memory for the use of the extension, a pointer
 to it comes in the <tt><b>user</b></tt> callback parameter
 <dt><b>per_context_private_data</b>
-<dd>Optional storage for this externsion that
+<dd>Optional storage for this extension that
 is per-context, so it can track stuff across
 all sessions, etc, if it wants
+</dl>
+<hr>
+<h2>struct lws_context_creation_info - </h2>
+<b>struct lws_context_creation_info</b> {<br>
+&nbsp; &nbsp; <i>int</i> <b>port</b>;<br>
+&nbsp; &nbsp; <i>const char *</i> <b>iface</b>;<br>
+&nbsp; &nbsp; <i>struct libwebsocket_protocols *</i> <b>protocols</b>;<br>
+&nbsp; &nbsp; <i>struct libwebsocket_extension *</i> <b>extensions</b>;<br>
+&nbsp; &nbsp; <i>const char *</i> <b>ssl_cert_filepath</b>;<br>
+&nbsp; &nbsp; <i>const char *</i> <b>ssl_private_key_filepath</b>;<br>
+&nbsp; &nbsp; <i>const char *</i> <b>ssl_ca_filepath</b>;<br>
+&nbsp; &nbsp; <i>int</i> <b>gid</b>;<br>
+&nbsp; &nbsp; <i>int</i> <b>uid</b>;<br>
+&nbsp; &nbsp; <i>unsigned int</i> <b>options</b>;<br>
+&nbsp; &nbsp; <i>void *</i> <b>user</b>;<br>
+&nbsp; &nbsp; <i>int</i> <b>ka_time</b>;<br>
+&nbsp; &nbsp; <i>int</i> <b>ka_probes</b>;<br>
+&nbsp; &nbsp; <i>int</i> <b>ka_interval</b>;<br>
+};<br>
+<h3>Members</h3>
+<dl>
+<dt><b>port</b>
+<dd>Port to listen on... you can use 0 to suppress listening on
+any port, that's what you want if you are not running a
+websocket server at all but just using it as a client
+<dt><b>iface</b>
+<dd>NULL to bind the listen socket to all interfaces, or the
+interface name, eg, "eth2"
+<dt><b>protocols</b>
+<dd>Array of structures listing supported protocols and a protocol-
+specific callback for each one.  The list is ended with an
+entry that has a NULL callback pointer.
+It's not const because we write the owning_server member
+<dt><b>extensions</b>
+<dd>NULL or array of libwebsocket_extension structs listing the
+extensions this context supports.  If you configured with
+--without-extensions, you should give NULL here.
+<dt><b>ssl_cert_filepath</b>
+<dd>If libwebsockets was compiled to use ssl, and you want
+to listen using SSL, set to the filepath to fetch the
+server cert from, otherwise NULL for unencrypted
+<dt><b>ssl_private_key_filepath</b>
+<dd>filepath to private key if wanting SSL mode,
+else ignored
+<dt><b>ssl_ca_filepath</b>
+<dd>CA certificate filepath or NULL
+<dt><b>gid</b>
+<dd>group id to change to after setting listen socket, or -1.
+<dt><b>uid</b>
+<dd>user id to change to after setting listen socket, or -1.
+<dt><b>options</b>
+<dd>0, or LWS_SERVER_OPTION_DEFEAT_CLIENT_MASK
+<dt><b>user</b>
+<dd>optional user pointer that can be recovered via the context
+pointer using libwebsocket_context_user
+<dt><b>ka_time</b>
+<dd>0 for no keepalive, otherwise apply this keepalive timeout to
+all libwebsocket sockets, client or server
+<dt><b>ka_probes</b>
+<dd>if ka_time was nonzero, after the timeout expires how many
+times to try to get a response from the peer before giving up
+and killing the connection
+<dt><b>ka_interval</b>
+<dd>if ka_time was nonzero, how long to wait before each ka_probes
+attempt
 </dl>
 <hr>

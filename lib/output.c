@@ -33,7 +33,7 @@ libwebsocket_0405_frame_mask_generate(struct libwebsocket *wsi)
 	/* fetch the per-frame nonce */
 
 	n = libwebsockets_get_random(wsi->protocol->owning_server,
-						wsi->u.ws.frame_masking_nonce_04, 4);
+					   wsi->u.ws.frame_masking_nonce_04, 4);
 	if (n != 4) {
 		lwsl_parser("Unable to read from random device %s %d\n",
 						     SYSTEM_RANDOM_FILEPATH, n);
@@ -147,7 +147,7 @@ int lws_issue_raw(struct libwebsocket *wsi, unsigned char *buf, size_t len)
 		n = send(wsi->sock, buf, len, MSG_NOSIGNAL);
 		lws_latency(context, wsi, "send lws_issue_raw", n, n == len);
 		if (n != len) {
-			lwsl_debug("ERROR writing len %d to socket %d\n", len, n);
+			lwsl_debug("ERROR writing len %d to skt %d\n", len, n);
 			return -1;
 		}
 #ifdef LWS_OPENSSL_SUPPORT
@@ -367,14 +367,12 @@ int libwebsocket_write(struct libwebsocket *wsi, unsigned char *buf,
 			break;
 		case LWS_WRITE_PING:
 			n = LWS_WS_OPCODE_07__PING;
-			wsi->u.ws.pings_vs_pongs++;
 			break;
 		case LWS_WRITE_PONG:
 			n = LWS_WS_OPCODE_07__PONG;
 			break;
 		default:
-			lwsl_warn("libwebsocket_write: unknown write "
-							 "opcode / protocol\n");
+			lwsl_warn("lws_write: unknown write opc / protocol\n");
 			return -1;
 		}
 
@@ -424,8 +422,7 @@ int libwebsocket_write(struct libwebsocket *wsi, unsigned char *buf,
 	if (wsi->mode == LWS_CONNMODE_WS_CLIENT) {
 
 		if (libwebsocket_0405_frame_mask_generate(wsi)) {
-			lwsl_err("libwebsocket_write: "
-				      "frame mask generation failed\n");
+			lwsl_err("lws_write: frame mask generation failed\n");
 			return 1;
 		}
 
@@ -433,7 +430,9 @@ int libwebsocket_write(struct libwebsocket *wsi, unsigned char *buf,
 		 * in v7, just mask the payload
 		 */
 		for (n = 4; n < (int)len + 4; n++)
-			dropmask[n] = dropmask[n] ^ wsi->u.ws.frame_masking_nonce_04[(wsi->u.ws.frame_mask_index++) & 3];
+			dropmask[n] = dropmask[n] ^
+				wsi->u.ws.frame_masking_nonce_04[
+					(wsi->u.ws.frame_mask_index++) & 3];
 
 		if (dropmask)
 			/* copy the frame nonce into place */
@@ -450,7 +449,7 @@ send_raw:
 
 	switch (protocol) {
 	case LWS_WRITE_CLOSE:
-//		lwsl_hexdump(&buf[-pre], len + post);
+/*		lwsl_hexdump(&buf[-pre], len + post); */
 	case LWS_WRITE_HTTP:
 	case LWS_WRITE_PONG:
 	case LWS_WRITE_PING:
@@ -480,6 +479,42 @@ send_raw:
 	return lws_issue_raw_ext_access(wsi, buf - pre, len + pre + post);
 }
 
+int libwebsockets_serve_http_file_fragment(
+		struct libwebsocket_context *context, struct libwebsocket *wsi)
+{
+	int ret = 0;
+	int n;
+
+	while (!lws_send_pipe_choked(wsi)) {
+		n = read(wsi->u.http.fd, context->service_buffer,
+					       sizeof(context->service_buffer));
+		if (n > 0) {
+			libwebsocket_write(wsi, context->service_buffer, n,
+								LWS_WRITE_HTTP);
+			wsi->u.http.filepos += n;
+		}
+
+		if (n < 0)
+			return 1; /* caller will close */
+
+		if (n < sizeof(context->service_buffer) ||
+				wsi->u.http.filepos == wsi->u.http.filelen) {
+			wsi->state = WSI_STATE_HTTP;
+
+			if (wsi->protocol->callback)
+				ret = user_callback_handle_rxflow(
+					wsi->protocol->callback, context, wsi,
+					LWS_CALLBACK_HTTP_FILE_COMPLETION,
+					wsi->user_space, NULL, 0);
+			return ret;
+		}
+	}
+
+	lwsl_notice("choked before able to send whole file (post)\n");
+	libwebsocket_callback_on_writable(context, wsi);
+
+	return ret;
+}
 
 /**
  * libwebsockets_serve_http_file() - Send a file back to the client using http
@@ -491,138 +526,55 @@ send_raw:
  *	This function is intended to be called from the callback in response
  *	to http requests from the client.  It allows the callback to issue
  *	local files down the http link in a single step.
+ *
+ *	Returning <0 indicates error and the wsi should be closed.  Returning
+ *	>0 indicates the file was completely sent and the wsi should be closed.
+ *	==0 indicates the file transfer is started and needs more service later,
+ *	the wsi should be left alone.
  */
 
 int libwebsockets_serve_http_file(struct libwebsocket_context *context,
 			struct libwebsocket *wsi, const char *file,
 						       const char *content_type)
 {
-	int fd;
 	struct stat stat_buf;
-	char buf[1400];
-	char *p = buf;
-	int n, m;
+	unsigned char *p = context->service_buffer;
+	int ret = 0;
 
-	strncpy(wsi->u.http.filepath, file, sizeof wsi->u.http.filepath);
-	wsi->u.http.filepath[sizeof(wsi->u.http.filepath) - 1] = '\0';
-
+	wsi->u.http.fd = open(file, O_RDONLY
 #ifdef WIN32
-	fd = open(wsi->u.http.filepath, O_RDONLY | _O_BINARY);
-#else
-	fd = open(wsi->u.http.filepath, O_RDONLY);
+			 | _O_BINARY
 #endif
-	if (fd < 1) {
-		p += sprintf(p, "HTTP/1.0 400 Bad\x0d\x0a"
-			"Server: libwebsockets\x0d\x0a"
-			"\x0d\x0a"
+	);
+
+	if (wsi->u.http.fd < 1) {
+		p += sprintf((char *)p,
+		 "HTTP/1.0 400 Bad\x0d\x0aServer: libwebsockets\x0d\x0a\x0d\x0a"
 		);
-		libwebsocket_write(wsi, (unsigned char *)buf, p - buf,
-								LWS_WRITE_HTTP);
+		wsi->u.http.fd = 0;
+		libwebsocket_write(wsi, context->service_buffer,
+				p - context->service_buffer, LWS_WRITE_HTTP);
 
 		return -1;
 	}
 
-	fstat(fd, &stat_buf);
+	fstat(wsi->u.http.fd, &stat_buf);
 	wsi->u.http.filelen = stat_buf.st_size;
-	p += sprintf(p, "HTTP/1.0 200 OK\x0d\x0a"
-			"Server: libwebsockets\x0d\x0a"
-			"Content-Type: %s\x0d\x0a"
-			"Content-Length: %u\x0d\x0a"
-			"\x0d\x0a", content_type,
+	p += sprintf((char *)p,
+"HTTP/1.0 200 OK\x0d\x0aServer: libwebsockets\x0d\x0a""Content-Type: %s\x0d\x0a",
+								  content_type);
+	p += sprintf((char *)p,
+		"Content-Length: %u\x0d\x0a\x0d\x0a",
 					(unsigned int)stat_buf.st_size);
 
-	n = libwebsocket_write(wsi, (unsigned char *)buf, p - buf, LWS_WRITE_HTTP);
-	if (n) {
-		close(fd);
-		return n;
-	}
+	ret = libwebsocket_write(wsi, context->service_buffer,
+				   p - context->service_buffer, LWS_WRITE_HTTP);
+	if (ret)
+		return -1;
 
 	wsi->u.http.filepos = 0;
 	wsi->state = WSI_STATE_HTTP_ISSUING_FILE;
 
-	while (!lws_send_pipe_choked(wsi)) {
-
-		n = read(fd, buf, sizeof buf);
-		if (n > 0) {
-			wsi->u.http.filepos += n;
-			m = libwebsocket_write(wsi, (unsigned char *)buf, n, LWS_WRITE_HTTP);
-			if (m) {
-				close(fd);
-				return m;
-			}
-		}
-
-		if (n < 0) {
-			close(fd);
-			return -1;
-		}
-
-		if (n < sizeof(buf) || wsi->u.http.filepos == wsi->u.http.filelen) {
-			/* oh, we were able to finish here! */
-			wsi->state = WSI_STATE_HTTP;
-			close(fd);
-
-			if (wsi->protocol->callback(context, wsi, LWS_CALLBACK_HTTP_FILE_COMPLETION, wsi->user_space,
-							wsi->u.http.filepath, wsi->u.http.filepos)) {
-				lwsl_info("closing connecton after file_completion returned nonzero\n");
-				libwebsocket_close_and_free_session(context, wsi, LWS_CLOSE_STATUS_NOSTATUS);
-			}
-
-			return 0;
-		}
-	}
-
-	/* we choked, no worries schedule service for the rest of it */
-
-	libwebsocket_callback_on_writable(context, wsi);
-
-	close(fd);
-
-	return 0;
+	return libwebsockets_serve_http_file_fragment(context, wsi);
 }
-
-int libwebsockets_serve_http_file_fragment(struct libwebsocket_context *context,
-							struct libwebsocket *wsi)
-{
-	int fd;
-	int ret = 0;
-	char buf[1400];
-	int n;
-
-#ifdef WIN32
-	fd = open(wsi->u.http.filepath, O_RDONLY | _O_BINARY);
-#else
-	fd = open(wsi->u.http.filepath, O_RDONLY);
-#endif
-	if (fd < 1)
-		return -1;
-
-	lseek(fd, wsi->u.http.filepos, SEEK_SET);
-
-	while (!lws_send_pipe_choked(wsi)) {
-		n = read(fd, buf, sizeof buf);
-		if (n > 0) {
-			libwebsocket_write(wsi, (unsigned char *)buf, n, LWS_WRITE_HTTP);
-			wsi->u.http.filepos += n;
-		}
-
-		if (n < 0) {
-			close(fd);
-			return -1;
-		}
-
-		if (n < sizeof(buf) || wsi->u.http.filepos == wsi->u.http.filelen) {
-			wsi->state = WSI_STATE_HTTP;
-			close(fd);
-			return 0;
-		}
-	}
-
-	libwebsocket_callback_on_writable(context, wsi);
-
-	close(fd);
-
-	return ret;
-}
-
 

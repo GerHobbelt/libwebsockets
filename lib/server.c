@@ -37,7 +37,6 @@
 #endif
 
 #ifdef LWS_OPENSSL_SUPPORT
-extern int openssl_websocket_private_data_index;
 
 static void
 libwebsockets_decode_ssl_error(void)
@@ -85,7 +84,6 @@ struct libwebsocket *
 libwebsocket_create_new_server_wsi(struct libwebsocket_context *context)
 {
 	struct libwebsocket *new_wsi;
-	int n;
 
 	new_wsi = (struct libwebsocket *)malloc(sizeof(struct libwebsocket));
 	if (new_wsi == NULL) {
@@ -104,10 +102,11 @@ libwebsocket_create_new_server_wsi(struct libwebsocket_context *context)
 	new_wsi->state = WSI_STATE_HTTP;
 	new_wsi->u.hdr.name_buffer_pos = 0;
 	new_wsi->mode = LWS_CONNMODE_HTTP_SERVING;
+	new_wsi->hdr_parsing_completed = 0;
 
-	for (n = 0; n < WSI_TOKEN_COUNT; n++) {
-		new_wsi->utf8_token[n].token = NULL;
-		new_wsi->utf8_token[n].token_len = 0;
+	if (lws_allocate_header_table(new_wsi)) {
+		free(new_wsi);
+		return NULL;
 	}
 
 	/*
@@ -118,13 +117,6 @@ libwebsocket_create_new_server_wsi(struct libwebsocket_context *context)
 	 */
 	new_wsi->protocol = context->protocols;
 	new_wsi->user_space = NULL;
-
-	/*
-	 * Default protocol is 76 / 00
-	 * After 76, there's a header specified to inform which
-	 * draft the client wants, when that's seen we modify
-	 * the individual connection's spec revision accordingly
-	 */
 	new_wsi->ietf_spec_revision = 0;
 
 	return new_wsi;
@@ -133,18 +125,17 @@ libwebsocket_create_new_server_wsi(struct libwebsocket_context *context)
 int lws_server_socket_service(struct libwebsocket_context *context,
 			struct libwebsocket *wsi, struct pollfd *pollfd)
 {
-	unsigned char buf[LWS_SEND_BUFFER_PRE_PADDING + 1 +
-			 MAX_USER_RX_BUFFER + LWS_SEND_BUFFER_POST_PADDING];
 	struct libwebsocket *new_wsi;
 	int accept_fd;
 	unsigned int clilen;
 	struct sockaddr_in cli_addr;
 	int n;
-	int opt = 1;
 	ssize_t len;
 #ifdef LWS_OPENSSL_SUPPORT
 	int m;
+#ifndef USE_CYASSL
 	BIO *bio;
+#endif
 #endif
 
 	switch (wsi->mode) {
@@ -159,25 +150,35 @@ int lws_server_socket_service(struct libwebsocket_context *context,
 
 	#ifdef LWS_OPENSSL_SUPPORT
 			if (wsi->ssl)
-				len = SSL_read(wsi->ssl, buf, sizeof buf);
+				len = SSL_read(wsi->ssl,
+					context->service_buffer,
+					       sizeof(context->service_buffer));
 			else
 	#endif
-				len = recv(pollfd->fd, buf, sizeof buf, 0);
+				len = recv(pollfd->fd,
+					context->service_buffer,
+					sizeof(context->service_buffer), 0);
 
 			if (len < 0) {
 				lwsl_debug("Socket read returned %d\n", len);
 				if (errno != EINTR && errno != EAGAIN)
-					libwebsocket_close_and_free_session(context,
-						       wsi, LWS_CLOSE_STATUS_NOSTATUS);
+					libwebsocket_close_and_free_session(
+						context, wsi,
+						LWS_CLOSE_STATUS_NOSTATUS);
 				return 0;
 			}
 			if (!len) {
-				libwebsocket_close_and_free_session(context, wsi,
-							    LWS_CLOSE_STATUS_NOSTATUS);
+				lwsl_info("lws_server_skt_srv: read 0 len\n");
+				/* lwsl_info("   state=%d\n", wsi->state); */
+				if (!wsi->hdr_parsing_completed)
+					free(wsi->u.hdr.ah);
+				libwebsocket_close_and_free_session(
+				       context, wsi, LWS_CLOSE_STATUS_NOSTATUS);
 				return 0;
 			}
 
-			n = libwebsocket_read(context, wsi, buf, len);
+			n = libwebsocket_read(context, wsi,
+						context->service_buffer, len);
 			if (n < 0)
 				/* we closed wsi */
 				return 0;
@@ -190,18 +191,14 @@ int lws_server_socket_service(struct libwebsocket_context *context,
 
 		/* one shot */
 		pollfd->events &= ~POLLOUT;
-		
+
 		if (wsi->state != WSI_STATE_HTTP_ISSUING_FILE)
 			break;
 
-		if (libwebsockets_serve_http_file_fragment(context, wsi) < 0)
+		/* nonzero for completion or error */
+		if (libwebsockets_serve_http_file_fragment(context, wsi))
 			libwebsocket_close_and_free_session(context, wsi,
 					       LWS_CLOSE_STATUS_NOSTATUS);
-		else
-			if (wsi->state == WSI_STATE_HTTP && wsi->protocol->callback)
-				if (user_callback_handle_rxflow(wsi->protocol->callback, context, wsi, LWS_CALLBACK_HTTP_FILE_COMPLETION, wsi->user_space,
-								wsi->u.http.filepath, wsi->u.http.filepos))
-					libwebsocket_close_and_free_session(context, wsi, LWS_CLOSE_STATUS_NOSTATUS);
 		break;
 
 	case LWS_CONNMODE_SERVER_LISTENER:
@@ -217,7 +214,9 @@ int lws_server_socket_service(struct libwebsocket_context *context,
 		lws_latency_pre(context, wsi);
 		accept_fd  = accept(pollfd->fd, (struct sockaddr *)&cli_addr,
 								       &clilen);
-		lws_latency(context, wsi, "unencrypted accept LWS_CONNMODE_SERVER_LISTENER", accept_fd, accept_fd >= 0);
+		lws_latency(context, wsi,
+			"unencrypted accept LWS_CONNMODE_SERVER_LISTENER",
+						     accept_fd, accept_fd >= 0);
 		if (accept_fd < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
 				lwsl_debug("accept asks to try again\n");
@@ -227,13 +226,7 @@ int lws_server_socket_service(struct libwebsocket_context *context,
 			break;
 		}
 
-		/* Disable Nagle */
-		opt = 1;
-		setsockopt(accept_fd, IPPROTO_TCP, TCP_NODELAY,
-					      (const void *)&opt, sizeof(opt));
-
-		/* We are nonblocking... */
-		fcntl(accept_fd, F_SETFL, O_NONBLOCK);
+		lws_set_socket_options(context, accept_fd);
 
 		/*
 		 * look at who we connected to and give user code a chance
@@ -286,6 +279,9 @@ int lws_server_socket_service(struct libwebsocket_context *context,
 
 		SSL_set_fd(new_wsi->ssl, accept_fd);
 
+		#ifdef USE_CYASSL
+		CyaSSL_set_using_nonblock(new_wsi->ssl, 1);
+		#else
 		bio = SSL_get_rbio(new_wsi->ssl);
 		if (bio)
 			BIO_set_nbio(bio, 1); /* nonblocking */
@@ -296,8 +292,9 @@ int lws_server_socket_service(struct libwebsocket_context *context,
 			BIO_set_nbio(bio, 1); /* nonblocking */
 		else
 			lwsl_notice("NULL rbio\n");
+		#endif
 
-		/* 
+		/*
 		 * we are not accepted yet, but we need to enter ourselves
 		 * as a live connection.  That way we can retry when more
 		 * pieces come if we're not sorted yet
@@ -310,7 +307,7 @@ int lws_server_socket_service(struct libwebsocket_context *context,
 		libwebsocket_set_timeout(wsi, PENDING_TIMEOUT_SSL_ACCEPT,
 							AWAITING_TIMEOUT);
 
-		lwsl_info("inserted SSL acceipt into fds, trying actual SSL_accept\n");
+		lwsl_info("inserted SSL accept into fds, trying SSL_accept\n");
 
 		/* fallthru */
 
@@ -325,14 +322,17 @@ int lws_server_socket_service(struct libwebsocket_context *context,
 
 		lws_latency_pre(context, wsi);
 		n = SSL_accept(wsi->ssl);
-		lws_latency(context, wsi, "SSL_accept LWS_CONNMODE_SSL_ACK_PENDING\n", n, n == 1);
+		lws_latency(context, wsi,
+			"SSL_accept LWS_CONNMODE_SSL_ACK_PENDING\n", n, n == 1);
 
 		if (n != 1) {
 			m = SSL_get_error(wsi->ssl, n);
-			lwsl_debug("SSL_accept failed %d / %s\n", m, ERR_error_string(m, NULL));
+			lwsl_debug("SSL_accept failed %d / %s\n",
+						  m, ERR_error_string(m, NULL));
 
 			if (m == SSL_ERROR_WANT_READ) {
-				context->fds[wsi->position_in_fds_table].events |= POLLIN;
+				context->fds[
+				   wsi->position_in_fds_table].events |= POLLIN;
 
 				/* external POLL support via protocol 0 */
 				context->protocols[0].callback(context, wsi,
@@ -342,7 +342,8 @@ int lws_server_socket_service(struct libwebsocket_context *context,
 				break;
 			}
 			if (m == SSL_ERROR_WANT_WRITE) {
-				context->fds[wsi->position_in_fds_table].events |= POLLOUT;
+				context->fds[
+				  wsi->position_in_fds_table].events |= POLLOUT;
 
 				/* external POLL support via protocol 0 */
 				context->protocols[0].callback(context, wsi,
@@ -353,7 +354,8 @@ int lws_server_socket_service(struct libwebsocket_context *context,
 			lwsl_debug("SSL_accept failed skt %u: %s\n",
 			      pollfd->fd,
 			      ERR_error_string(m, NULL));
-			libwebsocket_close_and_free_session(context, wsi, LWS_CLOSE_STATUS_NOSTATUS);
+			libwebsocket_close_and_free_session(context, wsi,
+						     LWS_CLOSE_STATUS_NOSTATUS);
 			break;
 		}
 
@@ -363,10 +365,7 @@ int lws_server_socket_service(struct libwebsocket_context *context,
 
 		wsi->mode = LWS_CONNMODE_HTTP_SERVING;
 
-		lwsl_debug("accepted new SSL conn  "
-		      "port %u on fd=%d SSL ver %s\n",
-			ntohs(cli_addr.sin_port),
-			  SSL_get_version(wsi->ssl));
+		lwsl_debug("accepted new SSL conn\n");
 		break;
 #endif
 
@@ -375,3 +374,4 @@ int lws_server_socket_service(struct libwebsocket_context *context,
 	}
 	return 0;
 }
+

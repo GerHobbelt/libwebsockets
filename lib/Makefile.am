@@ -1,3 +1,5 @@
+@applyhash@
+
 lib_LTLIBRARIES=libwebsockets.la
 include_HEADERS=libwebsockets.h
 dist_libwebsockets_la_SOURCES=libwebsockets.c \
@@ -42,13 +44,21 @@ else
 dist_libwebsockets_la_SOURCES += sha-1.c
 endif
 
-libwebsockets_la_CFLAGS=-Wall -std=gnu99 -pedantic -g
+libwebsockets_la_CFLAGS=-Wall -std=gnu99 -pedantic
 libwebsockets_la_LDFLAGS=
+
+# uncomment below and use cat ./lib/.libs/*.su | sort -k2g | tac
+# to get a worst-first list of static stack usage if you have gcc 4.6+
+#libwebsockets_la_CFLAGS+= -fstack-usage
+
+if USE_CYASSL
+libwebsockets_la_LDFLAGS+= -lcyassl
+endif
 
 if DISABLE_DEBUG
 libwebsockets_la_CFLAGS+= -O4
 else
-libwebsockets_la_CFLAGS+= -g
+libwebsockets_la_CFLAGS+= -O0 -g
 endif
 
 if MINGW
@@ -57,7 +67,7 @@ libwebsockets_la_LDFLAGS+= -lm -luser32 -ladvapi32 -lkernel32 -lgcc
 else
 libwebsockets_la_CFLAGS+= -rdynamic -fPIC -Werror
 # notice http://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html has rules for how to bump this
-libwebsockets_la_LDFLAGS+=  -version-info 2:0:0
+libwebsockets_la_LDFLAGS+=  -version-info 3:0:0
 endif
 
 libwebsockets_la_CFLAGS+= -c \
@@ -72,4 +82,8 @@ all-local:
                 *.c \
                 libwebsockets.h \
 			> ../libwebsockets-api-doc.html
+	 ../scripts/kernel-doc -text \
+                *.c \
+                libwebsockets.h \
+			> ../libwebsockets-api-doc.txt
 
