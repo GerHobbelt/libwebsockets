@@ -16,7 +16,7 @@ endif
 export CFLAGS CPPFLAGS LDFLAGS
 
 %:
-	dh $@ --parallel --dbg-package=libwebsockets2-dbg --with autoreconf
+	dh $@ --parallel --dbg-package=libwebsockets3-dbg --with autoreconf
 
 override_dh_auto_configure:
 	dh_auto_configure -- --enable-openssl --enable-libcrypto

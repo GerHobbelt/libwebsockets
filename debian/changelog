@@ -1,4 +1,4 @@
-libwebsockets (1.1+ds1-1) UNRELEASED; urgency=low
+libwebsockets (1.2+ds1-1) UNRELEASED; urgency=low
 
   * Initial release (Closes: #697671)
 

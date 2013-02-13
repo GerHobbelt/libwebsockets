@@ -2,4 +2,4 @@
 # creating the API reference.  There is no GPL-licensed code in either
 # the library or the test tools.
 #
-libwebsockets2: possible-gpl-code-linked-with-openssl
+libwebsockets3: possible-gpl-code-linked-with-openssl

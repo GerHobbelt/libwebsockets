@@ -1,7 +1,0 @@
-0001-additional-casts-allow-test-server-build-as-cpp.patch
-0004-remove-one-more-mention-of-broadcast-callback.patch
-0006-improve-test-server-poll-loop-docs.patch
-01-spelling.patch
-02-api-reference.patch
-03-path-max.patch
-04-memleak-context.patch
