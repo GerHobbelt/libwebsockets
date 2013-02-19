@@ -1,7 +1,6 @@
 libwebsockets (1.2.2+ds1-1~2) UNRELEASED; urgency=low
 
   TODO:
-  - possibly integrate the post-1.22 getnameinfo() fix
   - write the missing test tools' manual pages
   - hide the private symbols when linking the library
 
