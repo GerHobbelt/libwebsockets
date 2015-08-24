@@ -1,5 +1,5 @@
 Document: libwebsockets-api-doc
-Title: Debian libwebsockets API Reference
+Title: libwebsockets API Reference
 Author: Andy Green <andy@warmcat.com>
 Abstract: This reference describes the Application Programming Interface
  for libwebsockets, the lightweight C websockets library.

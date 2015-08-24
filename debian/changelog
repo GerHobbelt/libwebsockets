@@ -1,9 +1,5 @@
-libwebsockets (1.2.2+ds1-1~2) UNRELEASED; urgency=low
+libwebsockets (1.2.2-1) unstable; urgency=low
 
-  TODO:
-  - write the missing test tools' manual pages
-  - hide the private symbols when linking the library
+  * Initial release (closes: #697671).
 
-  * Initial release (Closes: #697671)
-
- -- Peter Pentchev <roam@ringlet.net>  Wed, 06 Feb 2013 10:18:34 +0200
+ -- Peter Pentchev <roam@ringlet.net>  Thu, 28 Mar 2013 19:10:28 +0200

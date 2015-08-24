@@ -1,5 +1,5 @@
 Description: Hide private library symbols.
-Forwarded: not yet
+Forwarded: http://libwebsockets.org/trac/ticket/24
 Author: Peter Pentchev <roam@ringlet.net>
 Last-Update: 2013-02-19
 
