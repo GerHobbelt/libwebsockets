@@ -1,0 +1,37 @@
+name: generic-release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publishLinux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: linux
+        run: |
+          cmake ..
+          make && sudo make install
+        working-directory: ./build
+      - name: Zip headers
+        run: |
+          zip -r headers.zip ./build/include
+      - name: Upload Linux Assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./build/lib/libwebsockets.a
+          asset_name: linuxX64-libwebsockets.a
+          asset_content_type: application/a
+      - name: Upload Common Headers
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: headers.zip
+          asset_name: headers.zip
+          asset_content_type: application/zip

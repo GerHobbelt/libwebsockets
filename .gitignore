@@ -1,7 +1,6 @@
 #Ignore build files
 CMakeCache.txt
 CMakeFiles
-build
 cmake_install.cmake
 lws-minimal*
 Makefile
@@ -44,7 +43,7 @@ ltmain.sh
 config.sub
 ar-lib
 libwebsockets.pc
-build/
+#build/
 *.swp
 doc
 /build2/
