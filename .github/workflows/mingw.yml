@@ -9,23 +9,24 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: microsoft/setup-msbuild@v1.0.2
-        env:
-          ACTIONS_ALLOW_UNSECURE_COMMANDS: 'true'
-          VisualStudioVersion: "16.5.0.12403"
-
-      - name: cmake
-        run: cmake -G "Visual Studio 16" ..
-        working-directory: ./build
-      - name: build
-        run: msbuild ALL_BUILD.vcxproj
-        working-directory: ./build
+#      - uses: microsoft/setup-msbuild@v1.0.2
+#        env:
+#          ACTIONS_ALLOW_UNSECURE_COMMANDS: 'true'
+#          VisualStudioVersion: "16.5.0.12403"
+#
+#      - name: cmake
+#        run: cmake -G "Visual Studio 16" ..
+#        working-directory: ./build
+#      - name: build
+#        run: msbuild ALL_BUILD.vcxproj
+#        working-directory: ./build
+# TODO build it via mingw
       - name: Upload Mingw Assets
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./build/lib/Debug/websockets_static.lib
-          asset_name: mingwX64-libwebsockets.lib
+          asset_path: ./libwebsockets-mingwX64.a.1.4.6
+          asset_name: libwebsockets-mingwX64.a
           asset_content_type: application/a

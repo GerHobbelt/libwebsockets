@@ -33,13 +33,8 @@ void lwsl_emit_optee(int level, const char *line);
 #endif
 
 int log_level = LLL_ERR | LLL_WARN | LLL_NOTICE;
-static void (*lwsl_emit)(int level, const char *line)
-#ifndef LWS_PLAT_OPTEE
-	= lwsl_emit_stderr
-#else
-	= lwsl_emit_optee;
-#endif
-	;
+static void (*lwsl_emit)(int level, const char *line);
+
 #ifndef LWS_PLAT_OPTEE
 static const char * log_level_names ="EWNIDPHXCLUT??";
 #endif
@@ -100,102 +95,16 @@ lwsl_timestamp(int level, char *p, int len)
 #endif
 
 #ifndef LWS_PLAT_OPTEE
-static const char * const colours[] = {
-	"[31;1m", /* LLL_ERR */
-	"[36;1m", /* LLL_WARN */
-	"[35;1m", /* LLL_NOTICE */
-	"[32;1m", /* LLL_INFO */
-	"[34;1m", /* LLL_DEBUG */
-	"[33;1m", /* LLL_PARSER */
-	"[33m", /* LLL_HEADER */
-	"[33m", /* LLL_EXT */
-	"[33m", /* LLL_CLIENT */
-	"[33;1m", /* LLL_LATENCY */
-        "[0;1m", /* LLL_USER */
-	"[31m", /* LLL_THREAD */
-};
-
-static char tty;
-
-static void
-_lwsl_emit_stderr(int level, const char *line, int ts)
-{
-	char buf[50];
-	int n, m = LWS_ARRAY_SIZE(colours) - 1;
-
-	if (!tty)
-		tty = isatty(2) | 2;
-
-	buf[0] = '\0';
-#if defined(LWS_LOGS_TIMESTAMP)
-	if (ts)
-		lwsl_timestamp(level, buf, sizeof(buf));
-#endif
-
-	if (tty == 3) {
-		n = 1 << (LWS_ARRAY_SIZE(colours) - 1);
-		while (n) {
-			if (level & n)
-				break;
-			m--;
-			n >>= 1;
-		}
-		fprintf(stderr, "%c%s%s%s%c[0m", 27, colours[m], buf, line, 27);
-	} else
-		fprintf(stderr, "%s%s", buf, line);
-}
-
-void
-lwsl_emit_stderr(int level, const char *line)
-{
-	_lwsl_emit_stderr(level, line, 1);
-}
-
-void
-lwsl_emit_stderr_notimestamp(int level, const char *line)
-{
-	_lwsl_emit_stderr(level, line, 0);
-}
 
 #endif
 
 #if !(defined(LWS_PLAT_OPTEE) && !defined(LWS_WITH_NETWORK))
 void _lws_logv(int filter, const char *format, va_list vl)
 {
-#if LWS_MAX_SMP == 1 && !defined(LWS_WITH_THREADPOOL)
-	/* this is incompatible with multithreaded logging */
-	static char buf[256];
-#else
-	char buf[1024];
-#endif
-	int n;
-
-	if (!(log_level & filter))
-		return;
-
-	n = vsnprintf(buf, sizeof(buf) - 1, format, vl);
-	(void)n;
-	/* vnsprintf returns what it would have written, even if truncated */
-	if (n > (int)sizeof(buf) - 1) {
-		n = sizeof(buf) - 5;
-		buf[n++] = '.';
-		buf[n++] = '.';
-		buf[n++] = '.';
-		buf[n++] = '\n';
-		buf[n] = '\0';
-	}
-	if (n > 0)
-		buf[n] = '\0';
-	lwsl_emit(filter, buf);
 }
 
 void _lws_log(int filter, const char *format, ...)
 {
-	va_list ap;
-
-	va_start(ap, format);
-	_lws_logv(filter, format, ap);
-	va_end(ap);
 }
 #endif
 void lws_set_log_level(int level, void (*func)(int level, const char *line))

@@ -84,7 +84,6 @@ lws_get_random(struct lws_context *context, void *buf, size_t len)
 
 void lwsl_emit_syslog(int level, const char *line)
 {
-	lwsl_emit_stderr(level, line);
 }
 
 int

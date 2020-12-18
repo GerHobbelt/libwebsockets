@@ -607,8 +607,6 @@ lws_b64_selftest(void);
  #define get_daemonize_pid() (0)
 #endif
 
-void lwsl_emit_stderr(int level, const char *line);
-
 #if !defined(LWS_WITH_TLS)
  #define LWS_SSL_ENABLED(context) (0)
  #define lws_context_init_server_ssl(_a, _b) (0)

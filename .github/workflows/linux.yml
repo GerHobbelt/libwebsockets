@@ -11,7 +11,8 @@ jobs:
       - uses: actions/checkout@v2
       - name: linux
         run: |
-          cmake ..
+          export CXXFLAGS="$CXXFLAGS -fPIC"
+          cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON ..
           make && sudo make install
         working-directory: ./build
       - name: Zip headers
@@ -24,7 +25,7 @@ jobs:
         with:
           upload_url: ${{ github.event.release.upload_url }}
           asset_path: ./build/lib/libwebsockets.a
-          asset_name: linuxX64-libwebsockets.a
+          asset_name: libwebsockets-linuxX64.a
           asset_content_type: application/a
       - name: Upload Common Headers
         uses: actions/upload-release-asset@v1

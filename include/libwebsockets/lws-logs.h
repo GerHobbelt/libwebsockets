@@ -258,7 +258,7 @@ LWS_VISIBLE LWS_EXTERN void
 lwsl_emit_syslog(int level, const char *line);
 
 /**
- * lwsl_emit_stderr() - helper log emit function writes to stderr
+
  *
  * \param level: one of LLL_ log level indexes
  * \param line: log string
@@ -270,8 +270,6 @@ lwsl_emit_syslog(int level, const char *line);
  *
  * If stderr is a tty, then ansi colour codes are added.
  */
-LWS_VISIBLE LWS_EXTERN void
-lwsl_emit_stderr(int level, const char *line);
 
 /**
  * lwsl_emit_stderr_notimestamp() - helper log emit function writes to stderr

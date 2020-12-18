@@ -87,7 +87,7 @@ option(LWS_FOR_GITOHASHI "Enable features recommended for use with gitohashi" OF
 #
 # Compiler features
 #
-option(DISABLE_WERROR "Avoid treating compiler warnings as fatal errors" OFF)
+option(DISABLE_WERROR "Avoid treating compiler warnings as fatal errors" ON)
 
 #
 # Major individual features
@@ -674,7 +674,7 @@ if (NOT LWS_HAVE_REALLOC)
 endif()
 
 
-
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
 
 if (CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX OR COMPILER_IS_CLANG)
     include (CheckCCompilerFlag)
@@ -728,7 +728,7 @@ if (CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX OR COMPILER_IS_CLANG)
 	endif()
 
 	if ("${DISABLE_WERROR}" STREQUAL "OFF")
-		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
+		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror -Wunused-variable")
 	endif()
 endif ()
 

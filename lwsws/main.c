@@ -62,7 +62,6 @@ static int opts = 0, do_reload = 1;
 static uv_loop_t loop;
 static uv_signal_t signal_outer[2];
 static int pids[32];
-void lwsl_emit_stderr(int level, const char *line);
 
 #define LWSWS_CONFIG_STRING_SIZE (32 * 1024)
 
