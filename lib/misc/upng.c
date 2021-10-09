@@ -439,7 +439,7 @@ huffman_tree_create_lengths(lws_upng_t *upng, htree_t *tree,
 		if (bitlen[n])
 			tree1d[n] = nextcode[bitlen[n]]++;
 
-	for (n = 0; n < tree->numcodes * 2; n++)
+	for (n = 0; n < (unsigned int)tree->numcodes * 2u; n++)
 		tree->tree2d[n] = EMPTY;
 
 	for (n = 0; n < tree->numcodes; n++) {	/* the codes */
