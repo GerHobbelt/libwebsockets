@@ -45,7 +45,8 @@ lws_get_idlest_tsi(struct lws_context *context)
 }
 
 struct lws *
-lws_create_new_server_wsi(struct lws_vhost *vhost, int fixed_tsi, const char *desc)
+lws_create_new_server_wsi(struct lws_vhost *vhost, int fixed_tsi, int group,
+			  const char *desc)
 {
 	struct lws *new_wsi;
 	int n = fixed_tsi;
@@ -69,11 +70,8 @@ lws_create_new_server_wsi(struct lws_vhost *vhost, int fixed_tsi, const char *de
 
 	lws_wsi_fault_timedclose(new_wsi);
 
-	__lws_lc_tag(vhost->context, &vhost->context->lcg[
-#if defined(LWS_ROLE_H2) || defined(LWS_ROLE_MQTT)
-	strcmp(desc, "adopted") ? LWSLCG_WSI_MUX :
-#endif
-	LWSLCG_WSI_SERVER], &new_wsi->lc, desc);
+	__lws_lc_tag(vhost->context, &vhost->context->lcg[group],
+			&new_wsi->lc, "%s|%s", vhost->name, desc);
 
 	new_wsi->wsistate |= LWSIFR_SERVER;
 	new_wsi->tsi = (char)n;
@@ -122,7 +120,7 @@ __lws_adopt_descriptor_vhost1(struct lws_vhost *vh, lws_adoption_type type,
 			    const char *vh_prot_name, struct lws *parent,
 			    void *opaque, const char *fi_wsi_name)
 {
-	struct lws_context *context = vh->context;
+	struct lws_context *context;
 	struct lws_context_per_thread *pt;
 	struct lws *new_wsi;
 	int n;
@@ -133,12 +131,17 @@ __lws_adopt_descriptor_vhost1(struct lws_vhost *vh, lws_adoption_type type,
 	 * we initialize it, it may become "live" concurrently unexpectedly...
 	 */
 
+	if (!vh)
+		return NULL;
+
+	context = vh->context;
+
 	lws_context_assert_lock_held(vh->context);
 
 	n = -1;
 	if (parent)
 		n = parent->tsi;
-	new_wsi = lws_create_new_server_wsi(vh, n, "adopted");
+	new_wsi = lws_create_new_server_wsi(vh, n, LWSLCG_WSI_SERVER, fi_wsi_name);
 	if (!new_wsi)
 		return NULL;
 
@@ -843,11 +846,13 @@ lws_create_adopt_udp(struct lws_vhost *vhost, const char *ads, int port,
 		n = getaddrinfo(ads, buf, &h, &r);
 		if (n) {
 #if !defined(LWS_PLAT_FREERTOS)
-			lwsl_info("%s: getaddrinfo error: %s\n", __func__,
-				  gai_strerror(n));
+			lwsl_cx_info(vhost->context, "getaddrinfo error: %d", n);
 #else
-			lwsl_info("%s: getaddrinfo error: %s\n", __func__,
-					strerror(n));
+#if !defined(LWS_WITH_NO_LOGS)
+			char t16[16];
+			lwsl_cx_info(vhost->context, "getaddrinfo error: %s",
+				lws_errno_describe(LWS_ERRNO, t16, sizeof(t16)));
+#endif
 #endif
 			//freeaddrinfo(r);
 			goto bail1;

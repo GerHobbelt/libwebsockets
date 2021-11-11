@@ -159,7 +159,7 @@ option(LWS_WITH_SYS_METRICS "Lws Metrics API" OFF)
 #
 # Secure Streams
 #
-option(LWS_WITH_SECURE_STREAMS "Secure Streams protocol-agnostic API" OM)
+option(LWS_WITH_SECURE_STREAMS "Secure Streams protocol-agnostic API" ON)
 option(LWS_WITH_SECURE_STREAMS_CPP "Secure Streams C++ classes" OFF)
 option(LWS_WITH_SECURE_STREAMS_PROXY_API "Secure Streams support to work across processes" OFF)
 option(LWS_WITH_SECURE_STREAMS_SYS_AUTH_API_AMAZON_COM "Auth support for api.amazon.com" OFF)
@@ -1088,6 +1088,9 @@ file(RELATIVE_PATH
 
 if (DEFINED REL_INCLUDE_DIR)
     set(LWS__INCLUDE_DIRS "\${LWS_CMAKE_DIR}/${REL_INCLUDE_DIR}")
+endif()
+if (DEFINED OPENSSL_INCLUDE_DIRS)
+	set(LWS__INCLUDE_DIRS "${LWS__INCLUDE_DIRS};${OPENSSL_INCLUDE_DIRS}")
 endif()
 
 configure_file(${PROJECT_SOURCE_DIR}/cmake/libwebsockets-config.cmake.in

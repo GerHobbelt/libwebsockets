@@ -1214,7 +1214,8 @@ lws_client_reset(struct lws **wsi, int ssl, const char *address, int port,
 		 const char *path, const char *host, char weak);
 
 struct lws * LWS_WARN_UNUSED_RESULT
-lws_create_new_server_wsi(struct lws_vhost *vhost, int fixed_tsi, const char *desc);
+lws_create_new_server_wsi(struct lws_vhost *vhost, int fixed_tsi,
+				int group, const char *desc);
 
 char * LWS_WARN_UNUSED_RESULT
 lws_generate_client_handshake(struct lws *wsi, char *pkt);
@@ -1398,6 +1399,15 @@ lws_sort_dns(struct lws *wsi, const struct addrinfo *result);
 int
 lws_broadcast(struct lws_context_per_thread *pt, int reason, void *in, size_t len);
 
+const char *
+lws_errno_describe(int en, char *result, size_t len);
+
+struct lws_plugin *
+lws_plugin_alloc(struct lws_plugin **pplugin);
+
+int
+lws_plugins_handle_builtin(struct lws_plugin **pplugin,
+			   each_plugin_cb_t each, void *each_user);
 
 #if defined(LWS_WITH_PEER_LIMITS)
 void
