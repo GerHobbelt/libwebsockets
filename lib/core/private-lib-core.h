@@ -449,6 +449,10 @@ struct lws_context {
 #endif
 	lws_sorted_usec_list_t			sul_cpd_defer;
 
+#if defined(LWS_WITH_DLO)
+	lws_dll2_owner_t		fonts;
+#endif
+
 #if defined(LWS_WITH_NETWORK)
 	struct lws_context_per_thread		pt[LWS_MAX_SMP];
 	lws_retry_bo_t				default_retry;
@@ -537,7 +541,6 @@ struct lws_context {
 #if defined(LWS_WITH_DRIVERS)
 	lws_netdevs_t			netdevs;
 #endif
-
 #if defined(LWS_WITH_SYS_ASYNC_DNS)
 	lws_async_dns_t			async_dns;
 #endif
