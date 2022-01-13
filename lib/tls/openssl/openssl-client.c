@@ -744,7 +744,11 @@ lws_klog_dump(const SSL *ssl, const char *line)
 	}
 
 	wx += strlen(line) + 1;
-	w += (size_t)write(fd, line, strlen(line));
+	w += (size_t)write(fd, line, 
+#if defined(WIN32)
+			(unsigned int)
+#endif
+			strlen(line));
 	w += (size_t)write(fd, "\n", 1);
 	close(fd);
 
