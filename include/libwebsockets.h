@@ -645,6 +645,7 @@ lws_fixed3232_roundup(const lws_fixed3232_t *a);
 #include <libwebsockets/lws-map.h>
 
 #include <libwebsockets/lws-fault-injection.h>
+#include <libwebsockets/lws-backtrace.h>
 #include <libwebsockets/lws-timeout-timer.h>
 #include <libwebsockets/lws-cache-ttl.h>
 #if defined(LWS_WITH_SYS_SMD)

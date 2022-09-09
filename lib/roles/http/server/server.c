@@ -698,7 +698,7 @@ lws_http_serve(struct lws *wsi, char *uri, const char *origin,
 		if (wsi->http.fop_fd)
 			lws_vfs_file_close(&wsi->http.fop_fd);
 
-		wsi->http.fop_fd = fops->LWS_FOP_OPEN(wsi->a.context->fops,
+		wsi->http.fop_fd = fops->LWS_FOP_OPEN(fops, wsi->a.context->fops,
 							path, vpath, &fflags);
 		if (!wsi->http.fop_fd) {
 			lwsl_info("%s: Unable to open '%s': errno %d\n",
@@ -1232,6 +1232,8 @@ lws_check_basic_auth(struct lws *wsi, const char *basic_auth_login_file,
 
 	return LCBA_CONTINUE;
 #else
+	if (!basic_auth_login_file && auth_mode == LWSAUTHM_DEFAULT)
+		return LCBA_CONTINUE;
 	return LCBA_FAILED_AUTH;
 #endif
 }
@@ -2753,7 +2755,7 @@ lws_serve_http_file(struct lws *wsi, const char *file, const char *content_type,
 	if (!wsi->http.fop_fd) {
 		fops = lws_vfs_select_fops(wsi->a.context->fops, file, &vpath);
 		fflags |= lws_vfs_prepare_flags(wsi);
-		wsi->http.fop_fd = fops->LWS_FOP_OPEN(wsi->a.context->fops,
+		wsi->http.fop_fd = fops->LWS_FOP_OPEN(fops, wsi->a.context->fops,
 							file, vpath, &fflags);
 		if (!wsi->http.fop_fd) {
 			lwsl_info("%s: Unable to open: '%s': errno %d\n",

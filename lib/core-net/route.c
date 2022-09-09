@@ -103,7 +103,7 @@ _lws_routing_table_dump(struct lws_context *cx)
 lws_route_uidx_t
 _lws_route_get_uidx(struct lws_context *cx)
 {
-	uint8_t ou;
+	lws_route_uidx_t ou;
 
 	if (!cx->route_uidx)
 		cx->route_uidx++;
@@ -154,8 +154,6 @@ _lws_route_remove(struct lws_context_per_thread *pt, lws_route_t *robj, int flag
 		    ((flags & LRR_IGNORE_PRI) ||
 		      robj->priority == rou->priority)
 		    ) {
-			if (flags & LRR_JUST_CHECK)
-				return rou;
 			lwsl_cx_info(pt->context, "deleting route");
 			_lws_route_pt_close_route_users(pt, robj->uidx);
 			lws_dll2_remove(&rou->list);
