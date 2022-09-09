@@ -8,25 +8,42 @@ The underlying type is
 ```
 typedef struct lws_fixed3232 {
         int32_t         whole;  /* signed 32-bit int */
-        uint32_t        frac;   /* proportion from 0 to (100M - 1) */
-} lws_fixed3232_t;
+        int32_t         frac;   /* proportion from 0 to (100M - 1) */
+} lws_fx_t;
 ```
+
+Either or both of whole or frac may be negative, indicating that the
+combined scalar is negative.  This is to deal with numbers less than
+0 but greater than -1 not being able to use whole to indicating
+signedness, since it's zero.  This scheme allows .whole to be used
+as a signed `int32_t` naturally.
 
 ## Fractional representation
 
 The fractional part counts parts per 100M and is restricted to the range
-0 .. 99999999.  For convenience a constant `LWS_F3232_FRACTION_MSD` is
+0 .. 99999999.  For convenience a constant `LWS_FX_FRACTION_MSD` is
 defined with the value 100M.
 
 It's possible to declare constants naturally, but leading zeroes are not
 valid on the fractional part, since C parses a leading 0 as indicating
 the number is octal.
 
-Eg to declare 12.5 and 6.0
+For the case of negative values less than 1, the fractional part bears the
+sign.
+
+Eg to declare 12.5, 6.0, -6.0, 0.1 and -0.1
 
 ```
-	static const lws_fixed3232_t x[2] = { { 12,50000000 }, { 6,0 } };
+	static const lws_fx_t x[2] = { { 12,50000000 }, { 6,0 },
+			{ -6, 0 }, { 0, 10000000 }, { 0, -10000000 } };
 ```
+
+There are some helpers
+
+|Helper|Function|
+|---|---|
+|`lws_neg(a)`|nonzero if a is negative in whole or fractional part|
+|`lws_fx_set(a,w,f)`|Convenience to set `lws_fx_t` a in code, notices if w is negative and also marks f the same|
 
 ## API style
 
@@ -37,26 +54,32 @@ chaining more natural.
 ## Available operations
 
 ```
-const lws_fixed3232_t *
-lws_fixed3232_add(lws_fixed3232_t *r, const lws_fixed3232_t *a, const lws_fixed3232_t *b);
+const lws_fx_t *
+lws_fx_add(lws_fx_t *r, const lws_fx_t *a, const lws_fx_t *b);
 
-const lws_fixed3232_t *
-lws_fixed3232_sub(lws_fixed3232_t *r, const lws_fixed3232_t *a, const lws_fixed3232_t *b);
+const lws_fx_t *
+lws_fx_sub(lws_fx_t *r, const lws_fx_t *a, const lws_fx_t *b);
 
-const lws_fixed3232_t *
-lws_fixed3232_mul(lws_fixed3232_t *r, const lws_fixed3232_t *a, const lws_fixed3232_t *b);
+const lws_fx_t *
+lws_fx_mul(lws_fx_t *r, const lws_fx_t *a, const lws_fx_t *b);
 
-const lws_fixed3232_t *
-lws_fixed3232_div(lws_fixed3232_t *r, const lws_fixed3232_t *a, const lws_fixed3232_t *b);
+const lws_fx_t *
+lws_fx_div(lws_fx_t *r, const lws_fx_t *a, const lws_fx_t *b);
 
-const lws_fixed3232_t *
-lws_fixed3232_sqrt(lws_fixed3232_t *r, const lws_fixed3232_t *a);
+const lws_fx_t *
+lws_fx_sqrt(lws_fx_t *r, const lws_fx_t *a);
 
 int /* -1 if a < b, 1 if a > b, 0 if exactly equal */
-lws_fixed3232_comp(const lws_fixed3232_t *a, const lws_fixed3232_t *b);
+lws_fx_comp(const lws_fx_t *a, const lws_fx_t *b);
 
 int /* return whole, or whole + 1 if frac is nonzero */
-lws_fixed3232_roundup(const lws_fixed3232_t *a);
+lws_fx_roundup(const lws_fx_t *a);
+
+int /* return whole */
+lws_fx_rounddown(const lws_fx_t *a);
+
+const char * /* format an lws_fx_t into a buffer */
+lws_fx_string(const lws_fx_t *a, char *buf, size_t size
 ```
 
 div and sqrt operations are iterative, up to 64 loops.  Multiply is relatively cheap

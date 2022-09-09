@@ -1729,66 +1729,110 @@ lws_sigbits(uintptr_t u)
 	return n;
 }
 
-const lws_fixed3232_t *
-lws_fixed3232_add(lws_fixed3232_t *r, const lws_fixed3232_t *a, const lws_fixed3232_t *b)
+const lws_fx_t *
+lws_fx_add(lws_fx_t *r, const lws_fx_t *a, const lws_fx_t *b)
 {
-	int64_t _a = lws_fix64(a), _b = lws_fix64(b);
+	int32_t w, sf;
 
-	_a = _a + _b;
+	w = a->whole + b->whole;
+	sf = a->frac + b->frac;
+	if (sf >= 100000000) {
+		w++;
+		r->frac = sf - 100000000;
+	} else if (sf < -100000000) {
+		w--;
+		r->frac = sf + 100000000;
+	} else
+		r->frac = sf;
 
-	lws_fix3232(r, _a);
+	r->whole = w;
 
 	return r;
 }
 
-const lws_fixed3232_t *
-lws_fixed3232_sub(lws_fixed3232_t *r, const lws_fixed3232_t *a, const lws_fixed3232_t *b)
+const lws_fx_t *
+lws_fx_sub(lws_fx_t *r, const lws_fx_t *a, const lws_fx_t *b)
 {
-	int64_t _a = lws_fix64(a), _b = lws_fix64(b);
+	int32_t w;
 
-	_a = _a - _b;
-
-	lws_fix3232(r, _a);
+	if (a->whole >= b->whole) {
+		w = a->whole - b->whole;
+		if (a->frac >= b->frac)
+			r->frac = a->frac - b->frac;
+		else {
+			w--;
+			r->frac = (100000000 + a->frac) - b->frac;
+		}
+	} else {
+		w = -(b->whole - a->whole);
+		if (b->frac >= a->frac)
+			r->frac = b->frac - a->frac;
+		else {
+			w++;
+			r->frac = (100000000 + b->frac) - a->frac;
+		}
+	}
+	r->whole = w;
 
 	return r;
 }
 
-const lws_fixed3232_t *
-lws_fixed3232_mul(lws_fixed3232_t *r, const lws_fixed3232_t *a, const lws_fixed3232_t *b)
+const lws_fx_t *
+lws_fx_mul(lws_fx_t *r, const lws_fx_t *a, const lws_fx_t *b)
 {
 	int64_t _c1, _c2;
-	int32_t t;
+	int32_t w, t;
+	char neg = 0;
 
-	assert(a->frac < LWS_F3232_FRACTION_MSD);
-	assert(b->frac < LWS_F3232_FRACTION_MSD);
+	assert(a->frac < LWS_FX_FRACTION_MSD);
+	assert(b->frac < LWS_FX_FRACTION_MSD);
 
-	r->whole = a->whole * b->whole;
-	_c2 = (((int64_t)((int64_t)a->frac) * (int64_t)b->frac) / LWS_F3232_FRACTION_MSD);
+	/* we can't use r as a temp, because it may alias on to a, b */
 
-	if (a->whole >= 0 && b->whole >= 0) {
-		_c1 = ((int64_t)a->frac * ((int64_t)b->whole)) + (((int64_t)a->whole) * (int64_t)b->frac) + _c2;
-		r->whole += (int32_t)(_c1 / LWS_F3232_FRACTION_MSD);
+	w = a->whole * b->whole;
+
+	if (!lws_neg(a) && !lws_neg(b)) {
+		_c2 = (((int64_t)((int64_t)a->frac) * (int64_t)b->frac) /
+							LWS_FX_FRACTION_MSD);
+		_c1 = ((int64_t)a->frac * ((int64_t)b->whole)) +
+		        (((int64_t)a->whole) * (int64_t)b->frac) + _c2;
+		w += (int32_t)(_c1 / LWS_FX_FRACTION_MSD);
 	} else
-		if (a->whole < 0 && b->whole >= 0) {
-			_c1 = ((int64_t)a->frac * (-(int64_t)b->whole)) + (((int64_t)a->whole) * (int64_t)b->frac) - _c2;
-			r->whole += (int32_t)(_c1 / LWS_F3232_FRACTION_MSD);
+		if (lws_neg(a) && !lws_neg(b)) {
+			_c2 = (((int64_t)((int64_t)-a->frac) * (int64_t)b->frac) /
+								LWS_FX_FRACTION_MSD);
+			_c1 = ((int64_t)-a->frac * (-(int64_t)b->whole)) +
+			       (((int64_t)a->whole) * (int64_t)b->frac) - _c2;
+			w += (int32_t)(_c1 / LWS_FX_FRACTION_MSD);
+			neg = 1;
 		} else
-			if (a->whole >= 0 && b->whole < 0) {
-				_c1 = ((int64_t)a->frac * ((int64_t)b->whole)) - (((int64_t)a->whole) * (int64_t)b->frac) - _c2;
-				r->whole += (int32_t)(_c1 / LWS_F3232_FRACTION_MSD);
+			if (!lws_neg(a) && lws_neg(b)) {
+				_c2 = (((int64_t)((int64_t)a->frac) * (int64_t)-b->frac) /
+									LWS_FX_FRACTION_MSD);
+				_c1 = ((int64_t)a->frac * ((int64_t)b->whole)) -
+				       (((int64_t)a->whole) * (int64_t)-b->frac) - _c2;
+				w += (int32_t)(_c1 / LWS_FX_FRACTION_MSD);
+				neg = 1;
 			} else {
-				_c1 = ((int64_t)a->frac * ((int64_t)b->whole)) + (((int64_t)a->whole) * (int64_t)b->frac) - _c2;
-				r->whole -= (int32_t)(_c1 / LWS_F3232_FRACTION_MSD);
+				_c2 = (((int64_t)((int64_t)-a->frac) * (int64_t)-b->frac) /
+									LWS_FX_FRACTION_MSD);
+				_c1 = ((int64_t)-a->frac * ((int64_t)b->whole)) +
+				       (((int64_t)a->whole) * (int64_t)-b->frac) - _c2;
+				w -= (int32_t)(_c1 / LWS_FX_FRACTION_MSD);
 			}
 
-	t = (int32_t)(_c1 % LWS_F3232_FRACTION_MSD);
-	r->frac = (uint32_t)(t < 0 ? -t : t);
+	t = (int32_t)(_c1 % LWS_FX_FRACTION_MSD);
+	r->whole = w; /* don't need a,b any further... now we can write to r */
+	if (neg ^ !!(t < 0))
+		r->frac = -t;
+	else
+		r->frac = t;
 
 	return r;
 }
 
-const lws_fixed3232_t *
-lws_fixed3232_div(lws_fixed3232_t *r, const lws_fixed3232_t *a, const lws_fixed3232_t *b)
+const lws_fx_t *
+lws_fx_div(lws_fx_t *r, const lws_fx_t *a, const lws_fx_t *b)
 {
 	int64_t _a = lws_fix64_abs(a), _b = lws_fix64_abs(b), q = 0, d, m;
 
@@ -1808,19 +1852,22 @@ lws_fixed3232_div(lws_fixed3232_t *r, const lws_fixed3232_t *a, const lws_fixed3
 		_a = q >> 1;
 	}
 
-	lws_fix3232(r, _a);
-
-	if ((a->whole < 0) ^ (b->whole < 0))
-		r->whole = -r->whole;
+	if (lws_neg(a) ^ lws_neg(b)) {
+		r->whole = -(int32_t)(_a >> 32);
+		r->frac = -(int32_t)((100000000 * (_a & 0xffffffff)) >> 32);
+	} else {
+		r->whole = (int32_t)(_a >> 32);
+		r->frac = (int32_t)((100000000 * (_a & 0xffffffff)) >> 32);
+	}
 
 	return r;
 }
 
-const lws_fixed3232_t *
-lws_fixed3232_sqrt(lws_fixed3232_t *r, const lws_fixed3232_t *a)
+const lws_fx_t *
+lws_fx_sqrt(lws_fx_t *r, const lws_fx_t *a)
 {
 	uint64_t t, q = 0, b = 1ull << 62, v = ((uint64_t)a->whole << 32) +
-	    	 (((uint64_t)a->frac << 32) / LWS_F3232_FRACTION_MSD);
+	    	 (((uint64_t)a->frac << 32) / LWS_FX_FRACTION_MSD);
 
 	while (b > 0x40) {
 		t = q + b;
@@ -1833,8 +1880,8 @@ lws_fixed3232_sqrt(lws_fixed3232_t *r, const lws_fixed3232_t *a)
 	}
 
 	r->whole = (int32_t)(q >> 48);
-	r->frac = (uint32_t)((((q >> 16) & 0xffffffff) *
-					LWS_F3232_FRACTION_MSD) >> 32);
+	r->frac = (int32_t)((((q >> 16) & 0xffffffff) *
+					LWS_FX_FRACTION_MSD) >> 32);
 
 	return r;
 }
@@ -1842,7 +1889,7 @@ lws_fixed3232_sqrt(lws_fixed3232_t *r, const lws_fixed3232_t *a)
 /* returns < 0 if a < b, >0 if a > b, or 0 if exactly equal */
 
 int
-lws_fixed3232_comp(const lws_fixed3232_t *a, const lws_fixed3232_t *b)
+lws_fx_comp(const lws_fx_t *a, const lws_fx_t *b)
 {
 	if (a->whole < b->whole)
 		return -1;
@@ -1859,12 +1906,39 @@ lws_fixed3232_comp(const lws_fixed3232_t *a, const lws_fixed3232_t *b)
 }
 
 int
-lws_fixed3232_roundup(const lws_fixed3232_t *a)
+lws_fx_roundup(const lws_fx_t *a)
 {
-	if (a->frac)
-		return a->whole + 1;
+	if (!a->frac)
+		return a->whole;
 
+	if (lws_neg(a))
+		return a->whole - 1;
+
+	return a->whole + 1;
+}
+
+LWS_VISIBLE LWS_EXTERN int
+lws_fx_rounddown(const lws_fx_t *a)
+{
 	return a->whole;
 }
 
+LWS_VISIBLE LWS_EXTERN const char *
+lws_fx_string(const lws_fx_t *a, char *buf, size_t size)
+{
+	int n, m = 7;
 
+	if (lws_neg(a))
+		n = lws_snprintf(buf, size - 1, "-%d.%08d", (int)-a->whole,
+				 (int)(a->frac < 0 ? -a->frac : a->frac));
+	else
+		n = lws_snprintf(buf, size - 1, "%d.%08d", (int)a->whole,
+				 (int)a->frac);
+
+	while (m-- && buf[n - 1] == '0')
+		n--;
+
+	buf[n] = '\0';
+
+	return buf;
+}

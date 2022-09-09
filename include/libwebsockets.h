@@ -614,39 +614,47 @@ struct lws;
 
 typedef struct lws_fixed3232 {
 	int32_t		whole;	/* signed 32-bit int */
-	uint32_t	frac;	/* proportion from 0 to (100M - 1) */
-} lws_fixed3232_t;
+	int32_t		frac;	/* signed frac proportion from 0 to (100M - 1) */
+} lws_fx_t;
 
-#define LWS_F3232_FRACTION_MSD 100000000
-#define lws_fixed_set(a, x, y) { a.whole = x; a.frac = y; }
-#define lws_fix64(a) (((int64_t)a->whole << 32) + (((1ll << 32) * (a->frac)) / 100000000))
-#define lws_fix64_abs(a) (((int64_t)(a->whole < 0 ? (-a->whole) : a->whole) << 32) + (((1ll << 32) * (a->frac)) / 100000000))
-#define LWFIX(q) (int)(q).whole, (unsigned int)(q).frac
+#define LWS_FX_FRACTION_MSD 100000000
+#define lws_neg(a) (a->whole < 0 || a->frac < 0)
+#define lws_fx_set(a, x, y) { a.whole = x; a.frac = x < 0 ? -y : y; }
+#define lws_fix64(a) (((int64_t)a->whole << 32) + \
+		(((1ll << 32) * (a->frac < 0 ? -a->frac : a->frac)) / LWS_FX_FRACTION_MSD))
+#define lws_fix64_abs(a) \
+	((((int64_t)(a->whole < 0 ? (-a->whole) : a->whole) << 32) + \
+			(((1ll << 32) * (a->frac < 0 ? -a->frac : a->frac)) / LWS_FX_FRACTION_MSD)))
 
 #define lws_fix3232(a, a64) { a->whole = (int32_t)(a64 >> 32); \
-			      a->frac = (uint32_t)((100000000 * (a64 & 0xffffffff)) >> 32); }
+			      a->frac = (int32_t)((100000000 * (a64 & 0xffffffff)) >> 32); }
 
-LWS_VISIBLE LWS_EXTERN const lws_fixed3232_t *
-lws_fixed3232_add(lws_fixed3232_t *r, const lws_fixed3232_t *a, const lws_fixed3232_t *b);
+LWS_VISIBLE LWS_EXTERN const lws_fx_t *
+lws_fx_add(lws_fx_t *r, const lws_fx_t *a, const lws_fx_t *b);
 
-LWS_VISIBLE LWS_EXTERN const lws_fixed3232_t *
-lws_fixed3232_sub(lws_fixed3232_t *r, const lws_fixed3232_t *a, const lws_fixed3232_t *b);
+LWS_VISIBLE LWS_EXTERN const lws_fx_t *
+lws_fx_sub(lws_fx_t *r, const lws_fx_t *a, const lws_fx_t *b);
 
-LWS_VISIBLE LWS_EXTERN const lws_fixed3232_t *
-lws_fixed3232_mul(lws_fixed3232_t *r, const lws_fixed3232_t *a, const lws_fixed3232_t *b);
+LWS_VISIBLE LWS_EXTERN const lws_fx_t *
+lws_fx_mul(lws_fx_t *r, const lws_fx_t *a, const lws_fx_t *b);
 
-LWS_VISIBLE LWS_EXTERN const lws_fixed3232_t *
-lws_fixed3232_div(lws_fixed3232_t *r, const lws_fixed3232_t *a, const lws_fixed3232_t *b);
+LWS_VISIBLE LWS_EXTERN const lws_fx_t *
+lws_fx_div(lws_fx_t *r, const lws_fx_t *a, const lws_fx_t *b);
 
-LWS_VISIBLE LWS_EXTERN const lws_fixed3232_t *
-lws_fixed3232_sqrt(lws_fixed3232_t *r, const lws_fixed3232_t *a);
-
-LWS_VISIBLE LWS_EXTERN int
-lws_fixed3232_comp(const lws_fixed3232_t *a, const lws_fixed3232_t *b);
+LWS_VISIBLE LWS_EXTERN const lws_fx_t *
+lws_fx_sqrt(lws_fx_t *r, const lws_fx_t *a);
 
 LWS_VISIBLE LWS_EXTERN int
-lws_fixed3232_roundup(const lws_fixed3232_t *a);
+lws_fx_comp(const lws_fx_t *a, const lws_fx_t *b);
 
+LWS_VISIBLE LWS_EXTERN int
+lws_fx_roundup(const lws_fx_t *a);
+
+LWS_VISIBLE LWS_EXTERN int
+lws_fx_rounddown(const lws_fx_t *a);
+
+LWS_VISIBLE LWS_EXTERN const char *
+lws_fx_string(const lws_fx_t *a, char *buf, size_t size);
 
 #include <libwebsockets/lws-dll2.h>
 #include <libwebsockets/lws-map.h>
@@ -759,8 +767,6 @@ lws_fixed3232_roundup(const lws_fixed3232_t *a);
 #include <libwebsockets/lws-button.h>
 #include <libwebsockets/lws-led.h>
 #include <libwebsockets/lws-pwm.h>
-#include <libwebsockets/lws-upng.h>
-#include <libwebsockets/lws-dlo.h>
 #include <libwebsockets/lws-display.h>
 #include <libwebsockets/lws-ssd1306-i2c.h>
 #include <libwebsockets/lws-ili9341-spi.h>
