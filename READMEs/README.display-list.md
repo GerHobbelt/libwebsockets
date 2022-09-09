@@ -2,11 +2,13 @@
 
 `lws_display_list` is a modernized 1970s-style Display List of graphic
 primitives held in an `lws_dll2` list of Display List Objects (DLOs).
+
 Provided DLO primitives are:
 
- - filled rectangle (with controllably-rounded corners)
+ - filled rectangle (with individually controllable rounded corners)
  - PNG (1:1 and original orientation only, transparency supported)
- - utf-8 text areas (using kerned bitmap psfu Unicode fonts)
+ - JPEG (1:1 and original orientation only)
+ - utf-8 text areas (using compressed, antialiased mcufonts)
 
 The aim of it is to process some other representation to describe the
 logical scene completely using DLOs in memory, discard the earlier
@@ -17,20 +19,21 @@ DLOs are destroyed as they go out of scope during rasterization.
 Although the memory required does scale with scene complexity in
 terms of number of DLOs, it hardly scales at all with output
 resolution, allowing modern 32-bpp rendering on very constrained
-devices, if a bit slowly.  Eg, text DLOs hold blocks of UTF-8 text,
-so the number of DLOs only scales slowly for chunks of text too.
+devices, if slowly.
 
 ## DLO capabilities
 
-DLOs are not as trivial as they sound
+DLOs are quite capable
 
- - no floats required (uses `lws_fixed3232` where fractional needed)
+ - no floats (`lws_fx` integer fixed-point)
  - 16-bit signed coordinate space with off-surface clipping handled
  - Internal 32-bpp RGBA colourspace (8-bit opacity)
  - correct Z-order opacity resolution
- - Supports arbitrary palette-ization (down to 1bpp) and error diffusion
+ - Supports arbitrary paletteization (down to 1bpp) and error diffusion
  - DLO-private error diffusion for clean opaque overlaid objects
- - Kerned bitmap text using a variety of standardized unicode fonts
+ - Antialised bitmap text using compressed fonts (eg 7 font sizes 10-
+   32px in both regular and bold < ~100KB)
+ - Very lightweight stateful PNG and JPEG decode
 
 All DLOs in a Display List are consumed as they are rasterized,
 individual DLOs are destroyed as soon as they go out of scope during
@@ -53,14 +56,39 @@ vertically do not cost any more peak memory allocation than decoding one,
 since the decoding contexts and DLOs of the earlier ones have been
 destroyed before the next one's decoding context is allocated.
 
+## DLO JPEGs
+
+DLOs can also represent JPEGs using a stream parsing rewite of picojpeg.
+No framebuffer is required to hold the output, it produces one line of
+pixels at a time.  JPEGs use either 8- or 16- line deep MCUs,
+necessitating an 8 or 16 line RGB (or Y if grayscale) pixel buffer
+during decode.
+
+Heap requirements while a JPG is being rasterized is 2.5KB plus the
+MCU buffer dependent on the chroma coding:
+
+|Image type|Fixed alloc|MCU buffer|
+|---|---|---|
+|grayscale|2.5KB|image width x 8 bytes|
+|YUV 4:4:4|2.5KB|image width x 24 bytes|
+|YUV 4:4:2v|2.5KB|image width x 24 bytes|
+|YUV 4:4:2h|2.5KB|image width x 48 bytes|
+|YUV 4:4:0|2.5KB|image width x 48 bytes|
+
 ## DLO text
 
-Text DLOs are predicated around unicode utf-8 and psfu (unix terminal
-bitmap font standard), a variety of liberally-licensed fonts up to
-32px high are available.
+Text DLOs are predicated around unicode utf-8 and a stream parsing
+rewrite of mcufont decoder.
 
-Glyphs are kerned on-the-fly to simulate proportional fonts to make
-best use of horizontal space and read easier.
+mcufont includes a ttf renderer app which is ported into lws as well,
+this allows production of antialised (16 alpha level) compressed
+bitmaped fonts from any ttf font at a selected size and including
+specified subsets of unicode code points.
+
+Font glyphs are decompressed statefully as part of the DLO line
+rasterization process, so there are no glyph buffers or caching.
+The decompression is very fast and allows fitting over a dozen
+font sizes and weights into 100KB.
 
 Wrapping inside a bounding box is supported as is "run-on", where text
 DLOs follow one another inline, used for example to use a bold font

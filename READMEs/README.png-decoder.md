@@ -31,20 +31,22 @@ The only decoding API provides input PNG data which may or may not be partly or
 wholly consumed, to produce a line of output pixels that can be found at `*ppix`.
 
 ```
-LWS_VISIBLE LWS_EXTERN lws_upng_ret_t
+LWS_VISIBLE LWS_EXTERN lws_stateful_ret_t
 lws_upng_emit_next_line(lws_upng_t *upng, const uint8_t **ppix,
 			const uint8_t **buf, size_t *size);
 ```
 
 If input data is consumed, `*buf` and `*size` are adjusted accordingly.
-This api returns one of
+This api returns a bitfield consisting of:
 
-|Return value|Meaning|
+|Return value bit|Meaning|
 |---|---|
-|`LWS_UPNG_OK`|Completed|
-|`LWS_UPNG_WANT_INPUT`|Decoder needs to be called again with more PNG input before it can produce a line of pixels|
-|`LWS_UPNG_WANT_OUTPUT`|Decoder has paused to emit a line of pixels|
-|`LWS_UPNG_FATAL`|Decoder has encountered a fatal error, any return greater than `LWS_UPNG_FATAL` indicates the type of error|
+|`LWS_SRET_OK` (0, no bits set)|Completed|
+|`LWS_SRET_WANT_INPUT`|Decoder needs to be called again with more PNG input before it can produce a line of pixels|
+|`LWS_SRET_WANT_OUTPUT`|Decoder has paused to emit a line of pixels, and can resume|
+|`LWS_SRET_FATAL`|Decoder has encountered a fatal error, any return greater than `LWS_SRET_FATAL` indicates the type of error|
+|`LWS_SRET_NO_FURTHER_IN`|Indicate no further new input will be used|
+|`LWS_SRET_NO_FURTHER_OUT`|Indicate no further output is forthcoming|
 
 To get early information about the dimensions and colourspace of the PNG, you
 can call this api initially with the first 33 bytes (`*size` restricted to 33)

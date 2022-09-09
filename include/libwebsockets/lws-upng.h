@@ -31,13 +31,6 @@
  * output at a time, statefully.
  */
 
-typedef enum {
-	LWS_UPNG_OK,
-	LWS_UPNG_WANT_INPUT,
-	LWS_UPNG_WANT_OUTPUT,
-	LWS_UPNG_FATAL
-} lws_upng_ret_t;
-
 typedef enum lws_upng_format_t {
 	LWS_UPNG_BADFORMAT,
 	LWS_UPNG_RGB8,
@@ -54,6 +47,7 @@ typedef enum lws_upng_format_t {
 	LWS_UPNG_LUMINANCE_ALPHA8
 } lws_upng_format_t;
 
+struct inflator_ctx;
 typedef struct lws_upng_t lws_upng_t;
 
 /**
@@ -79,9 +73,10 @@ lws_upng_free(lws_upng_t **upng);
  * lws_upng_emit_next_line() - deocde the next line
  *
  * \param upng: the decode object
- * \ppix: pointer to a pointer set to the line's decoded pixel data
- * \buf: pointer to a const uint8_t array of PNG input
- * \size: pointer to the count of bytes available at *buf
+ * \param ppix: pointer to a pointer set to the line's decoded pixel data
+ * \param buf: pointer to a const uint8_t array of PNG input
+ * \param size: pointer to the count of bytes available at *buf
+ * \param hold_at_metadata: true if we should not advance to decode
  *
  * Make PNG input available to the decoder so it can issue the next line's
  * worth of pixels.  If the call consumed any input, *buf and *size are
@@ -90,15 +85,22 @@ lws_upng_free(lws_upng_t **upng);
  * The decoder is stateful so it is not sensitive to the chunk size for the
  * input.
  *
- * Return will be one of LWS_UPNG_WANT_INPUT is the decoder is stalled waiting
- * for more input to be provided, LWS_UPNG_WANT_OUTPUT is the decoder stopped
+ * If \p hold_at_metadata is set, then the decoder will only go as far as
+ * picking out the metadata like image dimensions, but not start the decode,
+ * which requires the >30KB heap allocation.  This lets you put off for as long
+ * as possible committing to the decode allocation... this only helps overall
+ * if you have flow controlled the incoming PNG data.
+ *
+ * Return will be one of LWS_SRET_WANT_INPUT is the decoder is stalled waiting
+ * for more input to be provided, LWS_SRET_WANT_OUTPUT is the decoder stopped
  * because it had produced a whole line of output pixels (which can be found
- * starting at *ppix), LWS_UPNG_OK is it completed and LWS_UPNG_FATAL or larger
+ * starting at *ppix), LWS_SRET_OK is it completed and LWS_SRET_FATAL or larger
  * if the decode failed.
  */
-LWS_VISIBLE LWS_EXTERN lws_upng_ret_t
+LWS_VISIBLE LWS_EXTERN lws_stateful_ret_t
 lws_upng_emit_next_line(lws_upng_t *upng, const uint8_t **ppix,
-			const uint8_t **buf, size_t *size);
+			const uint8_t **buf, size_t *size,
+			char hold_at_metadata);
 
 LWS_VISIBLE LWS_EXTERN unsigned int
 lws_upng_get_width(const lws_upng_t *upng);
@@ -115,3 +117,44 @@ lws_upng_get_pixelsize(const lws_upng_t *upng);
 LWS_VISIBLE LWS_EXTERN lws_upng_format_t
 lws_upng_get_format(const lws_upng_t *upng);
 
+/**
+ * lws_upng_inflator_create() - create a gzip inflator context
+ *
+ * \param outring: pointer set to the output ringbuffer on exit
+ * \param outringlen: size of the output ringbuffer set on exit
+ * \param opl: pointer to set to point to ctx outpos_linear
+ * \param cl: pointer to set to point to ctx consumed_linear
+ *
+ * Creates an opaque gzip inflator object.
+ */
+LWS_VISIBLE LWS_EXTERN struct inflator_ctx *
+lws_upng_inflator_create(const uint8_t **outring, size_t *outringlen,
+			 size_t **opl, size_t **cl);
+
+/**
+ * lws_upng_inflate_data() - inflate compressed data statefully
+ *
+ * \param inf: inflator context created with lws_upng_inflator_create()
+ * \param buf: NULL to continue consumption of existing input, or new input
+ * \param len: ignored if \p buf is NULL, else amount of new input at \p buf
+ *
+ * Tries to progress the inflation.  If output is available, \p *opl will be
+ * further along than before it was called.  \p *cl should be set to \p opl
+ * to consume the available output data.
+ *
+ * Output is into a ringfuffer, typically sized at 32KB.  \p opl and \p cl
+ * are "linear", that is extend beyond the ringbuffer.  They should be modulo
+ * outringlen (given when the inflator was created) when accessing outring.
+ */
+LWS_VISIBLE LWS_EXTERN lws_stateful_ret_t
+lws_upng_inflate_data(struct inflator_ctx *inf, const void *buf, size_t len);
+
+/**
+ * lws_upng_inflator_destroy() - destroys the inflation context and ringbuffer
+ *
+ * \p inf: pointer to pointer to inflation context
+ *
+ * Frees the inflation context and its allocations, and sets \p *inf to NULL.
+ */
+LWS_VISIBLE LWS_EXTERN void
+lws_upng_inflator_destroy(struct inflator_ctx **inf);

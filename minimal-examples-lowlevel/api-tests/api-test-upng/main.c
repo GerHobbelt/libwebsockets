@@ -19,7 +19,7 @@ int
 main(int argc, const char **argv)
 {
 	int result = 0, logs = LLL_USER | LLL_ERR | LLL_WARN | LLL_NOTICE;
-	lws_upng_ret_t r = LWS_UPNG_WANT_INPUT;
+	lws_stateful_ret_t r = LWS_SRET_WANT_INPUT;
 	const char *p;
 	lws_upng_t *u;
 
@@ -80,7 +80,7 @@ main(int argc, const char **argv)
 		ssize_t s, os;
 		size_t ps;
 
-		if (r == LWS_UPNG_WANT_INPUT) {
+		if (r == LWS_SRET_WANT_INPUT) {
 			s = read(fdin, ib, sizeof(ib));
 
 			if (s <= 0) {
@@ -94,11 +94,12 @@ main(int argc, const char **argv)
 		}
 
 		do {
-			r = lws_upng_emit_next_line(u, &pix, &pib, &ps);
-			if (r == LWS_UPNG_WANT_INPUT)
+			r = lws_upng_emit_next_line(u, &pix, &pib, &ps, 0);
+			if (r == LWS_SRET_WANT_INPUT)
 				break;
 
-			if (r > LWS_UPNG_FATAL) {
+			if (r > LWS_SRET_FATAL) {
+				lwsl_err("%s: emit returned FATAL %d\n", __func__, r &0xff);
 				result = 1;
 				goto bail1;
 			}
@@ -117,7 +118,7 @@ main(int argc, const char **argv)
 				goto bail1;
 			}
 
-//			lwsl_notice("%s: wrote %d\n", __func__, (int)os);
+			lwsl_notice("%s: wrote %d\n", __func__, (int)os);
 		} while (ps);
 
 	} while (1);

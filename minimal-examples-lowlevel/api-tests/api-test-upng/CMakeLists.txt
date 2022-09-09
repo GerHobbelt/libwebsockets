@@ -10,6 +10,7 @@ set(SRCS main.c )
 
 set(requirements 1)
 require_lws_config(LWS_WITH_UPNG 1 requirements)
+require_lws_config(LWS_WITH_CLIENT 1 requirements)
 
 if (requirements)
 

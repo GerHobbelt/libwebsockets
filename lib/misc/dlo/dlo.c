@@ -27,39 +27,12 @@
 #include <private-lib-core.h>
 #include "private-lib-drivers-display-dlo.h"
 
-/*
- * For error disffusion, it's better to use YUV and prioritize reducing error
- * in Y (lumience)
- */
-
-#if 0
-static void
-rgb_to_yuv(uint8_t *yuv, const uint8_t *rgb)
-{
-	yuv[0] =  16 + ((257 * rgb[0]) / 1000) + ((504 * rgb[1]) / 1000) +
-						  ((98 * rgb[2]) / 1000);
-	yuv[1] = 128 - ((148 * rgb[0]) / 1000) - ((291 * rgb[1]) / 1000) +
-						 ((439 * rgb[2]) / 1000);
-	yuv[2] = 128 + ((439 * rgb[0]) / 1000) - ((368 * rgb[1]) / 1000) -
-						  ((71 * rgb[2]) / 1000);
-}
-
-static void
-yuv_to_rgb(uint8_t *rgb, const uint8_t *_yuv)
-{
-	unsigned int yuv[3];
-
-	yuv[0] = _yuv[0] - 16;
-	yuv[1] = _yuv[1] - 128;
-	yuv[2] = _yuv[2] - 128;
-
-	rgb[0] = ((1164 * yuv[0]) / 1000) + ((1596 * yuv[2]) / 1000);
-	rgb[1] = ((1164 * yuv[0]) / 1090) -  ((392 * yuv[1]) / 1000) -
-					     ((813 * yuv[2]) / 1000);
-	rgb[2] = ((1164 * yuv[0]) / 1000) + ((2017 * yuv[1]) / 1000);
-}
+#define dlodump_loglevel                LLL_NOTICE
+#if (_LWS_ENABLED_LOGS & dlodump_loglevel)
+#define lwsl_dlodump(...)               _lws_log(dlodump_loglevel, __VA_ARGS__)
+#else
+#define lwsl_dlodump(...)
 #endif
-
 
 void
 lws_display_dl_init(lws_displaylist_t *dl, lws_display_state_t *ds)
@@ -77,185 +50,325 @@ lws_display_dlo_add(lws_displaylist_t *dl, lws_dlo_t *dlo_parent, lws_dlo_t *dlo
 }
 
 void
-dist_err(const lws_colour_error_t *in, lws_colour_error_t *out, int sixteenths)
-{
-	out->rgb[0] = (int16_t)(out->rgb[0] + (int16_t)((sixteenths * in->rgb[0]) / 16));
-	out->rgb[1] = (int16_t)(out->rgb[1] + (int16_t)((sixteenths * in->rgb[1]) / 16));
-	out->rgb[2] = (int16_t)(out->rgb[2] + (int16_t)((sixteenths * in->rgb[2]) / 16));
-}
-
-void
 lws_surface_set_px(const lws_surface_info_t *ic, uint8_t *line, int x,
-		   const lws_display_colour_t *c, lws_colour_error_t *ce)
+		   const lws_display_colour_t *c)
 {
 	unsigned int alpha, ialpha;
 	lws_display_colour_t oc;
+	lws_display_colour_t y;
 	uint8_t rgb[3];
-	uint16_t n;
 
-	switch (ic->type) {
-	case LWSSURF_PALETTE_4BB:
-		oc = (lws_display_colour_t)ic->palette[(get_nyb(line, (x)) % ic->palette_depth)];
-		oc = LWSDC_RGBA(LWSDC_R(oc), LWSDC_G(oc), LWSDC_B(oc), 0xff);
-		n = lws_display_palettize(ic, *c, oc, ce);
-		set_nyb(line, x, (uint8_t)n);
-		break;
-	case LWSSURF_TRUECOLOR32:
-		oc = *(((uint32_t *)line) + x);
+	if (x < 0 || x >= ic->wh_px[0].whole)
+		return;
+
+	/*
+	 * All alpha composition takes place at 8bpp grey or 24bpp
+	 */
+
+	if (ic->greyscale) {
+
+		/* line composition buffer is 8-bit Y per pixel */
+
+		oc = line[x];
 		alpha = LWSDC_ALPHA(*c);
 		ialpha = 255 - alpha;
 
-		rgb[0] = (uint8_t)(((LWSDC_R(*c) * alpha) / 255) +
+		y = RGB_TO_Y(LWSDC_R(*c), LWSDC_G(*c), LWSDC_B(*c));
+
+		line[x] = (uint8_t)(((y * alpha) / 255) +
 			   ((LWSDC_R(oc) * ialpha) / 255));
-		rgb[1] = (uint8_t)(((LWSDC_G(*c) * alpha) / 255) +
-			   ((LWSDC_G(oc) * ialpha) / 255));
-		rgb[2] = (uint8_t)(((LWSDC_B(*c) * alpha) / 255) +
-			   ((LWSDC_B(oc) * ialpha) / 255));
-
-		line += (x * 4);
-		*line++ = rgb[0];
-		*line++ = rgb[1];
-		*line++ = rgb[2];
-		*line++ = 0xff;;
-
-		break;
-	default:
-		break;
+		return;
 	}
+
+	/* line composition buffer is 24-bit RGB per pixel */
+
+	line += 3 * x;
+
+	alpha = LWSDC_ALPHA(*c);
+	ialpha = 255 - alpha;
+
+	rgb[0] = (uint8_t)(((LWSDC_R(*c) * alpha) / 255) +
+			   ((line[0] * ialpha) / 255));
+	rgb[1] = (uint8_t)(((LWSDC_G(*c) * alpha) / 255) +
+			   ((line[1] * ialpha) / 255));
+	rgb[2] = (uint8_t)(((LWSDC_B(*c) * alpha) / 255) +
+			   ((line[2] * ialpha) / 255));
+
+	*line++ = rgb[0];
+	*line++ = rgb[1];
+	*line = rgb[2];
 }
 
+
+//#if defined(_DEBUG)
 void
-lws_display_raster(const lws_surface_info_t *ic, struct lws_dlo *dlo,
-			lws_display_scalar curr, int s, int e, uint8_t *line,
-			lws_colour_error_t **nle)
+lws_display_dl_dump(lws_displaylist_t *dl)
 {
-	lws_colour_error_t ce;
-	int os = s;
+	lws_display_render_stack_t	st[12]; /* DLO child stack */
+	int				sp = 0;
+	lws_dll2_t *d = lws_dll2_get_head(&dl->dl);
+#if (_LWS_ENABLED_LOGS & dlodump_loglevel)
+	static const char * const ind = "                           ";
+#endif
+	char b[4][22], b1[4][22], dt[96];
 
-	if (!LWSDC_ALPHA(dlo->dc))
+	if (!d) {
+		lwsl_notice("%s: empty dl\n", __func__);
+
 		return;
+	}
 
-	if (e > ic->wh_px[0].whole)
-		e = ic->wh_px[0].whole - 1;
+	lwsl_notice("%s\n", __func__);
 
-	while (s < e) {
-		ce = nle[!(curr & 1)][s - os];
+	memset(&st, 0, sizeof(st));
+	st[0].dlo = lws_container_of(d, lws_dlo_t, list);
 
-		lws_surface_set_px(ic, line, s, &dlo->dc, &ce);
+	while (sp || st[0].dlo) {
+		lws_dlo_t *dlo = st[sp].dlo;
+		lws_box_t co;
+		//lws_fx_t t2;
 
-		if (s != e - 1) {
-			dist_err(&ce, &nle[!(curr & 1)][s - os + 1], 7);
-			dist_err(&ce, &nle[curr & 1][s - os + 1], 1);
+		if (!dlo) {
+			if (!sp) {
+				lwsl_err("%s: underflow\n", __func__);
+					return;
+			}
+			sp--;
+			continue;
 		}
-		if (s > os)
-			dist_err(&ce, &nle[curr & 1][s - os- 1], 3);
 
-		dist_err(&ce, &nle[curr & 1][s - os], 5);
+		lws_fx_add(&co.x, &st[sp].co.x, &dlo->box.x);
+		lws_fx_add(&co.y, &st[sp].co.y, &dlo->box.y);
+		co.w = dlo->box.w;
+		co.h = dlo->box.h;
 
-		s++;
+		lws_snprintf(dt, sizeof(dt), "rect: RGBA 0x%08X", (unsigned int)dlo->dc);
+		if (dlo->_destroy == lws_display_dlo_text_destroy) {
+			lws_dlo_text_t *text = lws_container_of(dlo, lws_dlo_text_t, dlo);
+			lws_snprintf(dt, sizeof(dt), "text: RGBA 0x%08X, chars: %u, %.*s",
+					(unsigned int)dlo->dc, (unsigned int)text->text_len,
+					(int)text->text_len, text->text ? text->text : "(empty)");
+		}
+		else if (dlo->_destroy == lws_display_dlo_png_destroy)
+			lws_snprintf(dt, sizeof(dt), "png");
+		else if (dlo->_destroy == lws_display_dlo_jpeg_destroy)
+			lws_snprintf(dt, sizeof(dt), "jpeg");
+
+		lws_fx_string(&dlo->box.x, b[0], sizeof(b[0]));
+		lws_fx_string(&dlo->box.y, b[1], sizeof(b[1]));
+		lws_fx_string(&dlo->box.w, b[2], sizeof(b[2]));
+		lws_fx_string(&dlo->box.h, b[3], sizeof(b[3]));
+		lws_fx_string(&co.x, b1[0], sizeof(b1[0]));
+		lws_fx_string(&co.y, b1[1], sizeof(b1[1]));
+		lws_fx_string(&co.w, b1[2], sizeof(b1[2]));
+		lws_fx_string(&co.h, b1[3], sizeof(b1[3]));
+
+		lwsl_dlodump("%.*s box: (%s, %s) [%s x %s], co: (%s, %s) [%s x %s], %s\n",
+				sp, ind, b[0], b[1], b[2], b[3], b1[0], b1[1], b1[2], b1[3], dt);
+
+		/* go into any children */
+
+		if (dlo->children.head) {
+			if (sp + 1 == LWS_ARRAY_SIZE(st)) {
+				lwsl_err("%s: DLO stack overflow\n", __func__);
+				return;
+			}
+			st[sp++].dlo = lws_container_of(
+				dlo->children.head, lws_dlo_t, list);
+			st[sp].co = co;
+			continue;
+		}
+
+		d = dlo->list.next;
+		if (d)
+			st[sp].dlo = lws_container_of(d, lws_dlo_t, list);
+		else
+			st[sp].dlo = NULL;
 	}
 }
+//#endif
 
-int
-lws_dlo_ensure_err_diff(lws_dlo_t *dlo)
+/*
+ * Go through every DLO once, setting its id->box to the final layout for the
+ * related dlo, if any
+ */
+
+lws_stateful_ret_t
+lws_display_get_ids_boxes(lws_display_render_state_t *rs)
 {
-	/* defer creation of dlo's 2px-high dlo-width, 32bpp
-	 * error diffusion buffer */
+	lws_dll2_t *d;
 
-	if (dlo->nle[0])
-		return 0;
+	rs->lowest_id_y = 0;
 
-	dlo->nle[0] = lws_zalloc(sizeof(dlo->nle[0][0]) * 2u *
-				(unsigned int)(dlo->box.w.whole + 16 + 4),
-				__func__);
-	if (!dlo->nle[0])
-		return 1;
+	d = lws_dll2_get_head(&rs->displaylist.dl);
+	if (!d)
+		/* nothing in dlo */
+		return LWS_SRET_OK;
 
-	/*
-	 * We arrange to have 16px of valid diffusion behind the official lhs,
-	 * this is to manage kerning offsets at the start of line
-	 */
-	dlo->nle[0] += 16;
+	memset(&rs->st[0].co, 0, sizeof(rs->st[0].co));
+	rs->st[0].dlo = lws_container_of(d, lws_dlo_t, list);
 
-	dlo->nle[1] = dlo->nle[0] + dlo->box.w.whole + 16 + 4;
+	while (rs->sp || rs->st[0].dlo) {
+		lws_dlo_t *dlo = rs->st[rs->sp].dlo;
+		lws_box_t co;
+		lws_fx_t t2;
 
-	return 0;
-}
+		if (!dlo) {
+			rs->sp--;
+			continue;
+		}
 
-static void
-lws_display_list_render_dlo_recursive(lws_display_render_state_t *rs,
-				      lws_dlo_t *dlo, const lws_box_t *origin)
-{
-	lws_fixed3232_t t2;
-	lws_box_t co;
+		lws_fx_add(&co.x, &rs->st[rs->sp].co.x, &dlo->box.x);
+		lws_fx_add(&co.y, &rs->st[rs->sp].co.y, &dlo->box.y);
+		co.w = dlo->box.w;
+		co.h = dlo->box.h;
 
-	lws_fixed3232_add(&co.x, &origin->x, &dlo->box.x);
-	lws_fixed3232_add(&co.y, &origin->y, &dlo->box.y);
-	co.w = dlo->box.w;
-	co.h = dlo->box.h;
+		lws_fx_add(&t2, &co.y, &dlo->box.h);
 
-	lws_fixed3232_add(&t2, &co.y, &dlo->box.h);
+		if (dlo->id) {
+			lws_display_id_t *id = dlo->id;
 
-	/*
-	 * destroy display list items as soon as we're rendering
-	 * beyond their bottom edge, also destroys error
-	 * diffusion buffer (notice the origin offset of any parent is
-	 * accounted for since rs->curr is a display surface line index)
-	 */
+			lwsl_debug("%s: set id box %s\n", __func__, id->id);
+			id->box = co;
+			dlo->id = NULL; /* decouple us */
+		}
 
-	if (rs->curr > lws_fixed3232_roundup(&t2)) {
-		lws_display_dlo_destroy(&dlo);
-		return;
+		if (co.y.whole + co.h.whole > rs->lowest_id_y) {
+			rs->lowest_id_y = (lws_display_scalar)(co.y.whole + co.h.whole);
+			if (rs->lowest_id_y > rs->ic->wh_px[1].whole)
+				rs->lowest_id_y = (lws_display_scalar)rs->ic->wh_px[1].whole;
+		}
+
+		/* next sibling at this level if any */
+
+		d = dlo->list.next;
+		if (d)
+			rs->st[rs->sp].dlo = lws_container_of(d,
+						lws_dlo_t, list);
+		else
+			rs->st[rs->sp].dlo = NULL;
+
+		/* go into any children */
+
+		if (dlo->children.head) {
+			if (rs->sp + 1 == LWS_ARRAY_SIZE(rs->st)) {
+				lwsl_err("%s: DLO stack overflow\n",
+						__func__);
+				return LWS_SRET_FATAL;
+			}
+			rs->st[++rs->sp].dlo = lws_container_of(
+				dlo->children.head, lws_dlo_t, list);
+			rs->st[rs->sp].co = co;
+			continue;
+		}
 	}
 
-	if (rs->curr >= co.y.whole) {
-		lws_dlo_ensure_err_diff(dlo);
+	lws_display_render_dump_ids(&rs->ids);
 
-		/* clear down next line's error states */
-		memset(dlo->nle[rs->curr & 1] - 16, 0,
-		       sizeof(dlo->nle[0][0]) *
-				(unsigned int)(dlo->box.w.whole + 16 + 4));
-
-		dlo->render(rs->ic, dlo, origin, rs->curr, rs->line,
-			    &dlo->nle[0]);
-	}
-
-	if (!dlo->children.head)
-		return;
-
-	/*
-	 * Go through any children recursively, with their origin set to
-	 * ours, so they are "inside"
-	 */
-
-	lws_start_foreach_dll_safe(struct lws_dll2 *, p, p1,
-			      lws_dll2_get_head(&dlo->children)) {
-		lws_dlo_t *cdlo = lws_container_of(p, lws_dlo_t, list);
-
-		lws_display_list_render_dlo_recursive(rs, cdlo, &co);
-	} lws_end_foreach_dll_safe(p, p1);
+	return LWS_SRET_OK;
 }
 
-int
+lws_stateful_ret_t
 lws_display_list_render_line(lws_display_render_state_t *rs)
 {
-	lws_box_t origin;
+	lws_dll2_t *d;
 
-	if (!rs->displaylist)
-		return 0;
+	if (rs->html == 1)
+		return LWS_SRET_WANT_INPUT;
 
-	memset(&origin, 0, sizeof(origin));
-	lws_start_foreach_dll_safe(struct lws_dll2 *, p, p1,
-			      lws_dll2_get_head(&rs->displaylist->dl)) {
-		lws_dlo_t *dlo = lws_container_of(p, lws_dlo_t, list);
+	if (!rs->sp && !rs->st[0].dlo) {
 
-		lws_display_list_render_dlo_recursive(rs, dlo, &origin);
+		/* starting a line */
 
-	} lws_end_foreach_dll_safe(p, p1);
+		d = lws_dll2_get_head(&rs->displaylist.dl);
+		if (!d)
+			/* nothing in dlo */
+			return LWS_SRET_OK;
 
-	return 0;
+	//	memset(rs->line, 0, (size_t)rs->ic->wh_px[0].whole *
+	//				(rs->ic->greyscale ? 1 : 3));
+		memset(&rs->st[0].co, 0, sizeof(rs->st[0].co));
+		rs->st[0].dlo = lws_container_of(d, lws_dlo_t, list);
+	}
+
+	while (rs->sp || rs->st[0].dlo) {
+		lws_dlo_t *dlo = rs->st[rs->sp].dlo;
+		lws_stateful_ret_t r;
+		lws_box_t co;
+		lws_fx_t t2;
+
+		if (!dlo) {
+			rs->sp--;
+			continue;
+		}
+
+		// lwsl_notice("%s: curr %d: %d %d %d %d\n", __func__, rs->curr, dlo->box.x.whole, dlo->box.y.whole, dlo->box.w.whole, dlo->box.h.whole);
+
+		lws_fx_add(&co.x, &rs->st[rs->sp].co.x, &dlo->box.x);
+		lws_fx_add(&co.y, &rs->st[rs->sp].co.y, &dlo->box.y);
+		co.w = dlo->box.w;
+		co.h = dlo->box.h;
+
+		lws_fx_add(&t2, &co.y, &dlo->box.h);
+		if (rs->curr > lws_fx_roundup(&t2)) {
+			d = dlo->list.next;
+			rs->st[rs->sp].dlo = d ? lws_container_of(d, lws_dlo_t,
+								list) : NULL;
+
+			lws_display_dlo_destroy(&dlo);
+			continue;
+		}
+
+#if 0
+		if (dlo->_destroy == lws_display_dlo_png_destroy)
+			lwsl_err("png line %d %d %d %d\n", rs->curr, co.y.whole - 1,
+					rs->st[rs->sp].co.y.whole, dlo->box.y.whole);
+#endif
+
+		if (rs->curr >= co.y.whole - 1) {
+
+			r = dlo->render(rs);
+			//rs->ic, dlo, &rs->st[rs->sp].co,
+			//		rs->curr, rs->line, &dlo->nle[0]);
+			if (r)
+				return r;
+
+			/* next sibling at this level if any */
+
+			d = dlo->list.next;
+			if (d)
+				rs->st[rs->sp].dlo = lws_container_of(d,
+							lws_dlo_t, list);
+			else
+				rs->st[rs->sp].dlo = NULL;
+
+			/* go into any children */
+
+			if (dlo->children.head) {
+				if (rs->sp + 1 == LWS_ARRAY_SIZE(rs->st)) {
+					lwsl_err("%s: DLO stack overflow\n",
+							__func__);
+					return LWS_SRET_FATAL;
+				}
+				rs->st[++rs->sp].dlo = lws_container_of(
+					dlo->children.head, lws_dlo_t, list);
+				rs->st[rs->sp].co = co;
+				continue;
+			}
+		} else {
+			/* next sibling at this level if any */
+
+			d = dlo->list.next;
+			if (d)
+				rs->st[rs->sp].dlo = lws_container_of(d,
+							lws_dlo_t, list);
+			else
+				rs->st[rs->sp].dlo = NULL;
+		}
+	}
+
+	return LWS_SRET_OK;
 }
-
 
 void
 lws_display_dlo_destroy(lws_dlo_t **r)
@@ -266,7 +379,8 @@ lws_display_dlo_destroy(lws_dlo_t **r)
 	lws_dll2_remove(&(*r)->list);
 
 	while ((*r)->children.head) {
-		lws_dlo_t *d = lws_container_of((*r)->children.head, lws_dlo_t, list);
+		lws_dlo_t *d = lws_container_of((*r)->children.head,
+							lws_dlo_t, list);
 
 		lws_display_dlo_destroy(&d);
 	}
@@ -274,83 +388,254 @@ lws_display_dlo_destroy(lws_dlo_t **r)
 	if ((*r)->_destroy)
 		(*r)->_destroy(*r);
 
-	if ((*r)->nle[0]) {
-		(*r)->nle[0] -= 16;
-		lws_free_set_NULL((*r)->nle[0]);
-	}
-
 	lws_free_set_NULL(*r);
 	*r = NULL;
 }
 
 void
-lws_display_list_destroy(lws_displaylist_t **dl)
+lws_display_list_destroy(lws_displaylist_t *dl)
 {
-	if (!*dl)
+	if (!dl)
 		return;
 
-	while ((*dl)->dl.head) {
-		lws_dlo_t *d = lws_container_of((*dl)->dl.head, lws_dlo_t, list);
+	while (dl->dl.head) {
+		lws_dlo_t *d = lws_container_of(dl->dl.head, lws_dlo_t, list);
 
 		lws_display_dlo_destroy(&d);
 	}
-	*dl = NULL;
 }
 
-lws_display_palette_idx_t
-lws_display_palettize(const lws_surface_info_t *ic, lws_display_colour_t c,
-		      lws_display_colour_t oc, lws_colour_error_t *ectx)
+int
+lws_dlo_file_register(struct lws_context *cx, const lws_dlo_filesystem_t *f)
 {
-	unsigned int alpha = LWSDC_ALPHA(c), ialpha = 255 - alpha;
-	int best = 0x7fffffff, best_idx = 0, eialpha = 255;
-	lws_colour_error_t d;
-	size_t n;
+	const lws_dlo_filesystem_t *b;
+	lws_dlo_filesystem_t *a;
 
-	d.rgb[0] = (int16_t)(((LWSDC_R(c) * alpha) / 255) +
-		   ((LWSDC_R(oc) * ialpha) / 255) +
-			   (unsigned int)((ectx->rgb[0] * eialpha) / 255));
-	d.rgb[1] = (int16_t)(((LWSDC_G(c) * alpha) / 255) +
-		   ((LWSDC_G(oc) * ialpha) / 255) +
-			   (unsigned int)((ectx->rgb[1] * eialpha) / 255));
-	d.rgb[2] = (int16_t)(((LWSDC_B(c) * alpha) / 255) +
-		   ((LWSDC_B(oc) * ialpha) / 255) +
-			   (unsigned int)((ectx->rgb[2] * eialpha) / 255));
+	b = lws_dlo_file_choose(cx, f->name);
 
-	if (d.rgb[0] > 255)
-		d.rgb[0] = 255;
-	if (d.rgb[1] > 255)
-		d.rgb[1] = 255;
-	if (d.rgb[2] > 255)
-		d.rgb[2] = 255;
-	if (d.rgb[0] < 0)
-		d.rgb[0] = 0;
-	if (d.rgb[1] < 0)
-		d.rgb[1] = 0;
-	if (d.rgb[2] < 0)
-		d.rgb[2] = 0;
-
-	/*
-	 * We know what we want, considering transparency and prior error...
-	 * let's pick the least bad choice from the palette
-	 */
-
-	for (n = 0; n < ic->palette_depth; n++) {
-		lws_colour_error_t e;
-		int sum;
-
-		e.rgb[0] = (int16_t)((int)d.rgb[0] - (int)(LWSDC_R(ic->palette[n])));
-		e.rgb[1] = (int16_t)(d.rgb[1] - (int)(LWSDC_G(ic->palette[n])));
-		e.rgb[2] = (int16_t)(d.rgb[2] - (int)(LWSDC_B(ic->palette[n])));
-
-		sum = (e.rgb[0] * e.rgb[0]) + (e.rgb[1] * e.rgb[1]) +
-					      (e.rgb[2] * e.rgb[2]);
-		if (sum < best) {
-			best_idx = (int)n;
-			best = sum;
-			*ectx = e;
-		}
+	if (b) {
+		lwsl_err("%s: dlo file %s already exists\n", __func__, b->name);
+		lws_dlo_file_unregister((lws_dlo_filesystem_t **)&b);
 	}
 
-	return (lws_display_palette_idx_t)best_idx;
+	a = lws_malloc(sizeof(*a), __func__);
+	if (!a)
+		return 1;
+
+	*a = *f;
+	lws_dll2_clear(&a->list);
+	lws_dll2_add_tail(&a->list, &cx->dlo_file);
+
+	return 0;
 }
 
+/*
+ * Only needed with heap-alloc'd lws_dlo_filesystem_t
+ */
+
+void
+lws_dlo_file_unregister(lws_dlo_filesystem_t **f)
+{
+	if (!*f)
+		return;
+
+	lws_dll2_remove(&(*f)->list);
+	lws_free_set_NULL(*f);
+}
+
+static int
+_lws_dlo_file_destroy(struct lws_dll2 *d, void *user)
+{
+	lws_free(d);
+	return 0;
+}
+
+void
+lws_dlo_file_destroy(struct lws_context *cx)
+{
+	lws_dll2_foreach_safe(&cx->dlo_file, NULL, _lws_dlo_file_destroy);
+}
+
+const lws_dlo_filesystem_t *
+lws_dlo_file_choose(struct lws_context *cx, const char *name)
+{
+	lws_start_foreach_dll(struct lws_dll2 *, p,
+			      lws_dll2_get_head(&cx->dlo_file)) {
+		const lws_dlo_filesystem_t *pn = lws_container_of(p,
+						lws_dlo_filesystem_t, list);
+
+		if (!strcmp(name, pn->name))
+			return pn;
+
+	} lws_end_foreach_dll(p);
+
+	return NULL;
+}
+
+static int
+lws_display_id_destroy(struct lws_dll2 *d, void *user)
+{
+	lws_display_id_t *id = lws_container_of(d, lws_display_id_t, list);
+
+	lws_dll2_remove(&id->list);
+	lws_free(id);
+	return 0;
+}
+
+void
+lws_display_render_free_ids(lws_display_render_state_t *rs)
+{
+	lws_dll2_foreach_safe(&rs->ids, NULL, lws_display_id_destroy);
+}
+
+lws_display_id_t *
+lws_display_render_get_id(lws_display_render_state_t *rs, const char *_id)
+{
+	lws_start_foreach_dll(struct lws_dll2 *, d, lws_dll2_get_head(&rs->ids)) {
+		lws_display_id_t *id = lws_container_of(d, lws_display_id_t, list);
+
+		if (!strcmp(_id, id->id))
+			return id;
+
+	} lws_end_foreach_dll(d);
+
+	return NULL;
+}
+
+lws_display_id_t *
+lws_display_render_add_id(lws_display_render_state_t *rs, const char *_id, void *priv)
+{
+	lws_display_id_t *id;
+
+	id = lws_display_render_get_id(rs, _id);
+	if (id) {
+		id->priv_user = priv;
+		return id;
+	}
+
+	id = lws_zalloc(sizeof(*id), __func__);
+
+	if (id) {
+		lws_strncpy(id->id, _id, sizeof(id->id));
+		id->priv_user = priv;
+		lws_dll2_add_tail(&id->list, &rs->ids);
+	}
+
+	return id;
+}
+
+void
+lws_display_render_dump_ids(lws_dll2_owner_t *ids)
+{
+	lws_start_foreach_dll(struct lws_dll2 *, d, lws_dll2_get_head(ids)) {
+		lws_display_id_t *id = lws_container_of(d, lws_display_id_t, list);
+
+		if (!id->exists)
+			lwsl_notice("  id: '%s' (not present)\n", id->id);
+		else
+			lwsl_notice("  id: '%s', (%d,%d), %dx%d\n", id->id,
+					id->box.x.whole, id->box.y.whole,
+					id->box.w.whole, id->box.h.whole);
+	} lws_end_foreach_dll(d);
+}
+
+#if defined (LWS_WITH_FILE_OPS)
+
+int
+dlo_filesystem_fops_close(lws_fop_fd_t *fop_fd)
+{
+	lws_free_set_NULL(*fop_fd);
+	return 0;
+}
+
+lws_fileofs_t
+dlo_filesystem_fops_seek_cur(lws_fop_fd_t fop_fd,
+			     lws_fileofs_t pos)
+{
+	if (pos < 0)
+		fop_fd->pos = 0;
+	else
+		if (pos >= (long long)fop_fd->len)
+			fop_fd->pos = fop_fd->len;
+		else
+			fop_fd->pos = (lws_filepos_t)pos;
+
+	return (lws_fileofs_t)fop_fd->pos;
+}
+
+int
+dlo_filesystem_fops_write(lws_fop_fd_t fop_fd, lws_filepos_t *amount,
+			  uint8_t *buf, lws_filepos_t len)
+{
+	*amount = 0;
+
+	return -1;
+}
+
+int
+dlo_filesystem_fops_read(lws_fop_fd_t fop_fd, lws_filepos_t *amount,
+		    uint8_t *buf, lws_filepos_t len)
+{
+	const uint8_t *p = (uint8_t *)fop_fd->filesystem_priv;
+	lws_filepos_t amt = *amount;
+
+	*amount = 0;
+	if (fop_fd->len <= fop_fd->pos)
+		return 0;
+
+	if (amt > fop_fd->len - fop_fd->pos)
+		amt = fop_fd->len - fop_fd->pos;
+
+	if (amt > len)
+		amt = len;
+
+	memcpy(buf, p + fop_fd->pos, (size_t)amt);
+	fop_fd->pos += amt;
+
+	*amount = amt;
+
+	return 0;
+}
+
+lws_fop_fd_t
+lws_dlo_filesystem_fops_open(const struct lws_plat_file_ops *fops_own,
+			     const struct lws_plat_file_ops *fops,
+			     const char *vfs_path, const char *vpath,
+			     lws_fop_flags_t *flags)
+{
+	const lws_dlo_filesystem_t *f = NULL;
+	lws_fop_fd_t fop_fd;
+
+	// lwsl_err("%s: %s\n", __func__, vpath);
+
+	f = lws_dlo_file_choose(fops->cx, vpath);
+	if (f) {
+		/* we will handle it then */
+		fop_fd = lws_zalloc(sizeof(*fop_fd), __func__);
+		if (!fop_fd)
+			return NULL;
+
+		fop_fd->fops = fops_own;
+		fop_fd->filesystem_priv = (void *)f->data;
+		fop_fd->pos = 0;
+		fop_fd->len = f->len;
+
+		// lwsl_notice("%s: Opened %s\n", __func__, vpath);
+
+		return fop_fd;
+	} else
+		lwsl_err("%s: failed to open %s\n", __func__, vpath);
+
+	return NULL;
+}
+
+const struct lws_plat_file_ops lws_dlo_fops = {
+	.LWS_FOP_OPEN		= lws_dlo_filesystem_fops_open,
+	.LWS_FOP_CLOSE		= dlo_filesystem_fops_close,
+	.LWS_FOP_SEEK_CUR	= dlo_filesystem_fops_seek_cur,
+	.LWS_FOP_READ		= dlo_filesystem_fops_read,
+	.LWS_FOP_WRITE		= dlo_filesystem_fops_write,
+	.fi = { { "dlofs/", 6 } },
+};
+
+#endif

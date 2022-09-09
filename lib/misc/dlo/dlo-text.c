@@ -27,7 +27,7 @@
 #include <private-lib-core.h>
 #include "private-lib-drivers-display-dlo.h"
 
-static size_t
+size_t
 utf8_bytes(uint8_t u)
 {
 	if ((u & 0x80) == 0)
@@ -45,6 +45,30 @@ utf8_bytes(uint8_t u)
 	return 0;
 }
 
+static int
+utf8_unicode(const char *utf8, size_t *utf8_len, uint32_t *unicode)
+{
+	size_t glyph_len = utf8_bytes((uint8_t)*utf8);
+	size_t n;
+
+	if (!glyph_len || glyph_len > *utf8_len) {
+		(*utf8_len)--;
+		return 1;
+	}
+
+	if (glyph_len == 1)
+		*unicode = (uint32_t)*utf8++;
+	else {
+		*unicode = (uint32_t)((*utf8++) & (0x7f >> glyph_len));
+		for (n = 1; n < glyph_len; n++)
+			*unicode = (*unicode << 6) | ((*utf8++) & 0x3f);
+	}
+
+	*utf8_len -= glyph_len;
+
+	return 0;
+}
+
 void
 lws_display_dlo_text_destroy(struct lws_dlo *dlo)
 {
@@ -52,103 +76,19 @@ lws_display_dlo_text_destroy(struct lws_dlo *dlo)
 
 	lws_free_set_NULL(text->kern);
 	lws_free_set_NULL(text->text);
-}
 
-static const uint8_t *
-font_psfu_uniglyph(const struct lws_display_font *font, const char *utf8,
-		   size_t *m)
-{
-	const uint8_t *p = font->data, *u, *end = font->data + font->data_len, *ge;
-	uint32_t hdrlen = ntohl(lws_ser_ru32be(p + 8)),
-		 numglyph = ntohl(lws_ser_ru32be(p + 0x10)),
-		 bytesperglyph = ntohl(lws_ser_ru32be(p + 0x14));
-	size_t ulen = utf8_bytes((const uint8_t)*utf8);
-
-	if (!ulen) {
-		utf8 = "?";
-		ulen = 1;
-	}
-
-	assert(hdrlen < 256);
-	assert(numglyph < 65535);
-	assert(bytesperglyph < 65535);
-
-	p += hdrlen;
-	ge = u = p + (numglyph * bytesperglyph);
-	assert(u < end);
-
-	/*
-	 * For each glyph in the main part, there's an entry in the unicode
-	 * table describing its identity as UTF-8.  Each UTF-8 list ends with
-	 * 0xff delimiter
-	 */
-
-	while (p < ge && u < end) {
-		size_t gul = 0;
-
-		gul = utf8_bytes(*u);
-		if (gul >= 1 && gul == ulen && !memcmp(u, utf8, gul)) {
-			*m = gul;
-			return p;
-		}
-
-		while (*u != 0xff && u < end)
-			u++;
-
-		u++;
-
-		p += bytesperglyph;
-	}
-
-	*m = 1;
-
-	return NULL;
-}
-
-static size_t
-image_glyph(lws_dlo_text_t *text, const char *utf8,
-	    lws_display_gline_t *dest, size_t dest_height)
-{
-	size_t glyph_len;
-	const uint8_t *pxd = font_psfu_uniglyph(text->font, utf8, &glyph_len);
-	uint32_t bytesperglyph = ntohl(lws_ser_ru32be(text->font->data + 0x14)),
-		 h_px = ntohl(lws_ser_ru32be(text->font->data + 0x18)),
-		 bytes_per_line = bytesperglyph / h_px,
-		 n, y = 0, r;
-
-	if (h_px > dest_height)
-		h_px = (uint32_t)dest_height;
-
-	while (y < h_px) {
-
-		if (!pxd) {
-			dest[y] = 0;
-		} else {
-			r = (sizeof(dest[0]) * 8) - 8;
-			dest[y] = 0;
-			for (n = 0; n < bytes_per_line; n++) {
-				dest[y] = (unsigned int)(dest[y] | (unsigned int)(*pxd++ << r));
-				r -= 8;
-			}
-		}
-
-		y++;
-	}
-
-	return glyph_len;
+	lwsac_free(&text->ac_glyphs);
 }
 
 int
 lws_display_dlo_text_update(lws_dlo_text_t *text, lws_display_colour_t dc,
-		lws_fixed3232_t indent, const char *utf8, size_t text_len)
+			    lws_fx_t indent, const char *utf8, size_t text_len)
 {
-	lws_display_gline_t profile[2][MAX_FONT_HEIGHT], probe;
-	size_t n = 0, f = 0, cw, try, sp,
-	       w_px = ntohl(lws_ser_ru32be(text->font->data + 0x1c)),
-	       h_px = ntohl(lws_ser_ru32be(text->font->data + 0x18)),
-	       last_bp_n = 0;
-	uint8_t *tk, kernable = 0, r = 0;
-	lws_fixed3232_t t1, eff, kern, last_bp_eff;
+	const char *last_utf8 = utf8, *outf8 = utf8;
+	size_t last_bp_n = 0, tlen = text_len;
+	lws_fx_t t1, eff, last_bp_eff, t2;
+	uint8_t r = 0;
+	char uc;
 
 	if (text->kern)
 		lws_free_set_NULL(text->kern);
@@ -156,149 +96,117 @@ lws_display_dlo_text_update(lws_dlo_text_t *text, lws_display_colour_t dc,
 	if (text->text)
 		lws_free_set_NULL(text->text);
 
+	lws_dll2_owner_clear(&text->glyphs);
+	lwsac_free(&text->ac_glyphs);
+
+	text->indent = indent;
 	text->dlo.dc = dc;
 
-	tk = text->kern = lws_malloc(text_len * 2, __func__);
-	if (!text->kern)
-		return -1;
-
-	if (h_px > MAX_FONT_HEIGHT)
-		h_px = MAX_FONT_HEIGHT;
-
-	try = w_px;
-	lws_fixed_set(eff, 0, 0);
+	lws_fx_set(eff, 0, 0);
 
 	/*
 	 * Let's go through the new string glyph by glyph, we want to
 	 * calculate effective kerned widths, and optionally deal with wrapping.
+	 *
+	 * But we don't want to instantiate the glyph objects until we are
+	 * engaged with rendering them.  Otherwise we will carry around the
+	 * whole page-worth's of glyphs at once needlessly, which won't scale
+	 * for text-heavy pages.  lws_display_dlo_text_attach_glyphs() does the
+	 * same flow as this but to create the glyphs and is called later
+	 * as the text dlo becomes rasterized during rendering.
 	 */
 
-	while (n < text_len &&
-	       lws_fixed3232_comp(lws_fixed3232_add(&t1, &eff, &indent), &text->dlo.box.w) < 0) {
+/*	{ char b1[22]; lwsl_err("eff %s\n", lws_fx_string(&eff, b1, sizeof(b1))); }
+	{ char b1[22]; lwsl_err("indent %s\n", lws_fx_string(&indent, b1, sizeof(b1))); }
+	{ char b1[22]; lwsl_err("boxw %s\n", lws_fx_string(&text->dlo.box.w, b1, sizeof(b1))); } */
 
-		cw = image_glyph(text, &utf8[n], &profile[f][0], MAX_FONT_HEIGHT);
+	while (tlen &&
+	       lws_fx_comp(lws_fx_add(&t1, &eff, &indent), &text->dlo.box.w) < 0) {
+		size_t ot = tlen;
+		uint32_t unicode;
 
-		if (utf8[n] == ' ' && kernable)
-			kernable = 2;
+		if (!utf8_unicode(utf8, &tlen, &unicode)) {
+			text->font->image_glyph(text, unicode, 0);
 
-		/* ie, we have a previous char to work with */
+			uc = *utf8;
+			utf8 += (ot - tlen);
 
-		lws_fixed_set(kern, 0, 0);
-		if (kernable) {
-
-			/* We want to find "how far left we can shift" the left
-			 * of profile[f] into the right of profile[f ^ 1] */
-
-			/* after the first time, try is the remaining
-			 * width of the previous character after
-			 * trimming empty solumns from the right
-			 */
-
-			probe = kernable == 2 ? 0xffffffff : 0;
-			sp = try;
-
-			while (try > 1) {
-				size_t m, mask = 0;
-
-				for (m = 0; m < h_px; m++)
-					mask |= profile[f ^ 1][m] &
-						((profile[f][m] | probe) >> (try - 1));
-
-				if (mask) {
-					if (try < sp)
-						try++;
-					break;
-				}
-
-				try--;
+			if (uc == ' ') { /* act to snip it if used */
+				last_utf8 = utf8;
+				last_bp_n = tlen;
+				last_bp_eff = eff;
 			}
 
-			kern.whole = (int32_t)(sp - try); /* px to offset left */
-		}
+			if (!lws_display_font_mcufont_getcwidth(text, unicode, &t2))
+				lws_fx_add(&eff, &eff, &t2);
 
-		/*
-		 * We want to find how many px of this char actually
-		 * have nonblank data (skip if space)
-		 */
-
-		try = w_px;
-		while (try > 1 && kernable != 2) {
-			size_t m, mask = 0;
-
-			for (m = 0; m < h_px; m++)
-				mask |= (profile[f][m] << try);
-
-			if (mask) {
-				if (try < w_px)
-					try++;
-				break;
+			if (uc == '-' || uc == ',' || uc == ';' || uc == ':') {
+				/* act to leave it in */
+				last_utf8 = utf8;
+				last_bp_n = tlen;
+				last_bp_eff = eff;
 			}
-
-			try--;
-		}
-
-		if (n == 0)
-			kern.whole = (int32_t)(w_px - try);
-
-		if (utf8[n] == ' ') {
-			try = w_px / 2;
-			kernable = 0; /* next char can't kern away our space */
-			if (!n)
-				kern.whole = 0;
 		} else
-			kernable = 1;
-
-		*tk++ = (uint8_t)kern.whole;
-		*tk++ = (uint8_t)try;
-
-		if (utf8[n] == ' ') { /* act to skip it */
-			last_bp_n = n + cw;
-			lws_fixed3232_sub(&last_bp_eff, &eff, &kern);
-		}
-
-		lws_fixed3232_sub(&eff, &eff, &kern);
-		eff.whole += (int32_t)(try + 1);
-
-		if (utf8[n] == '-' || utf8[n] == ',' || utf8[n] == ';' ||
-		    utf8[n] == ':') { /* act to leave it in */
-			last_bp_n = n + cw;
-			last_bp_eff = eff;
-		}
-
-		f ^= 1;
-		n += cw;
+			lwsl_err("%s: missing glyph\n", __func__);
 	}
 
 	if (last_bp_n &&
-	    lws_fixed3232_comp(lws_fixed3232_add(&t1, &eff, &indent), &text->dlo.box.w) >= 0) {
-		lwsl_notice("%s: last_bp_n %d, eff %d.%u + indent %d.%u >= %d.%u\n",
-				__func__, (int)last_bp_n,
-				LWFIX(eff), LWFIX(indent),
-				LWFIX(text->dlo.box.w));
-		n = last_bp_n;
+	    lws_fx_comp(lws_fx_add(&t1, &eff, &indent), &text->dlo.box.w) >= 0) {
 		eff = last_bp_eff;
+		utf8 = last_utf8;
+		tlen = last_bp_n;
 		r = 1;
 	}
 
-	text->text_len = n;
-	if (!n) {
+	text->text_len = text_len - tlen;
+	if (tlen == text_len) {
 		lwsl_notice("we couldn't fit anything in there, newline\n");
 		return 2;
 	}
 
-	text->text = lws_malloc(n + 1, __func__);
+	text->text = lws_malloc(text->text_len + 1, __func__);
 	if (!text->text)
 		return -1;
 
-	memcpy(text->text, utf8, n);
-	text->text[n] = '\0';
+	memcpy(text->text, outf8, text->text_len);
+	text->text[text->text_len] = '\0';
 
 	memset(&text->bounding_box, 0, sizeof(text->bounding_box));
 	text->bounding_box.w = eff;
-	text->bounding_box.h.whole = (int32_t)h_px;
+	text->bounding_box.h.whole = text->font_height;
+	text->bounding_box.h.frac = 0;
 
-//	lwsl_notice("%s: text->bb->w %d, h %d\n", __func__,
-//			text->bounding_box.w.whole, text->bounding_box.h.whole);
+	return r;
+}
+
+int
+lws_display_dlo_text_attach_glyphs(lws_dlo_text_t *text)
+{
+	const char *utf8 = text->text;
+	size_t tlen = text->text_len;
+	lws_font_glyph_t *g = NULL;
+	uint32_t unicode;
+	lws_fx_t eff;
+	uint8_t r = 0;
+
+	lws_fx_set(eff, 0, 0);
+
+	while (tlen) {
+		size_t ot = tlen;
+
+		g = NULL;
+		if (!utf8_unicode(utf8, &tlen, &unicode))
+			/* instantiate the glyphs this time */
+			g = text->font->image_glyph(text, unicode, 1);
+		if (g == NULL) {
+			lwsl_warn("%s: no glyph for 0x%02X '%c'\n", __func__, (unsigned int)*utf8, *utf8);
+			break;
+		}
+
+		utf8 += (ot - tlen);
+		g->xpx = eff;
+		lws_fx_add(&eff, &eff, &g->cwidth);
+	}
 
 	return r;
 }
@@ -322,112 +230,91 @@ lws_display_dlo_text_new(lws_displaylist_t *dl, lws_dlo_t *dlo_parent,
 	return text;
 }
 
-void
-lws_display_font_psfu_render(const lws_surface_info_t *ic, struct lws_dlo *dlo,
-		const lws_box_t *origin, lws_display_scalar curr, uint8_t *line,
-		lws_colour_error_t **nle)
+static const char *
+castrstr(const char *haystack, const char *needle)
 {
-	lws_dlo_text_t *text = lws_container_of(dlo, lws_dlo_text_t, dlo);
-	int s, e, s1, r, yo;
-	uint32_t bytesperglyph = ntohl(lws_ser_ru32be(text->font->data + 0x14)),
-		 h_px = ntohl(lws_ser_ru32be(text->font->data + 0x18)),
-		 bytes_per_line = bytesperglyph / h_px,
-		 shf = 0, n, ins = 0;
-	const char *txt = text->text, *txt_end = txt + text->text_len;
-	lws_fixed3232_t ax, ay, t, t1, t2;
-	size_t glyph_len, ci = 0;
-	lws_colour_error_t ce;
-	const uint8_t *pxd;
+	size_t sn = strlen(needle), h = strlen(haystack) - sn + 1, n;
+	char c, c1;
 
-	lws_fixed3232_add(&ax, &origin->x, &dlo->box.x);
-	lws_fixed3232_add(&t, &ax, &dlo->box.w);
-	lws_fixed3232_add(&ay, &origin->y, &dlo->box.y);
-	lws_fixed3232_add(&t1, &ay, &dlo->box.h);
-
-	lws_fixed3232_add(&t2, &ax, &text->bounding_box.w);
-
-	s = ax.whole;
-	e = lws_fixed3232_roundup(&t2);
-
-	if (e <= 0)
-		return; /* wholly off to the left */
-	if (s >= ic->wh_px[0].whole)
-		return; /* wholly off to the right */
-
-	if (e >= ic->wh_px[0].whole)
-		e = ic->wh_px[0].whole;
-
-	/* figure out our y position inside the glyph */
-	yo = curr - ay.whole;
-	/* if further down than glyph height, nothing to do */
-	if (yo >= (int)h_px)
-		return;
-
-	memset(&ce, 0, sizeof(ce));
-
-	while (txt < txt_end && s < e) {
-
-		lws_dlo_ensure_err_diff(dlo);
-
-		pxd = font_psfu_uniglyph(text->font, txt, &glyph_len);
-		txt += glyph_len;
-
-		if (!pxd) {
-			shf = 0xffffffff;
-		} else {
-			pxd = pxd + (yo * (int)bytes_per_line);
-			r = 24;
-			shf = 0;
-			for (n = 0; n < bytes_per_line; n++) {
-				shf = (unsigned int)(shf | (unsigned int)(*pxd++ << r));
-				r -= 8;
-			}
+	while (1) {
+		for (n = 0; n < sn; n++) {
+			c = (char)((haystack[h + n] >= 'A' && haystack[h + n] <= 'Z') ?
+				haystack[h + n] + ('a' - 'A') : haystack[h + n]);
+			c1 = (char)((needle[n] >= 'A' && needle[n] <= 'Z') ?
+				needle[n] + ('a' - 'A') : needle[n]);
+			if (c != c1)
+				break;
 		}
+		if (n == sn)
+			return &haystack[h];
 
-		r = 31;
-
-		s1 = s - text->kern[ci];
-		for (ins = 0; ins < (uint32_t)text->kern[ci + 1] + 1; ins++) {
-			lws_display_colour_t c = LWSDC_RGBA(0, 0, 0, 255);
-			int sx = s1 - ax.whole;
-
-			if (s1 < 0 || s1 >= e || !(shf & (unsigned int)(1 << r)) ||
-			     !((shf & (unsigned int)(1 << r)) || ins >= text->kern[ci])) {
-				r--;
-				s1++;
-				continue;
-			}
-			c = dlo->dc;
-			ce = nle[!(curr & 1)][s1 - ax.whole];
-
-			lws_surface_set_px(ic, line, s1, &c, &ce);
-
-			if (s1 != e - 1) {
-				dist_err(&ce, &nle[!(curr & 1)][sx + 1], 7);
-				dist_err(&ce, &nle[curr & 1][sx + 1], 1);
-			}
-			if (s1 > ax.whole)
-				dist_err(&ce, &nle[curr & 1][sx - 1], 3);
-
-			dist_err(&ce, &nle[curr & 1][sx], 5);
-
-			r--;
-			s1++;
-		}
-
-		s = s1;
-		ci += 2;
+		if (!h)
+			break;
+		h--;
 	}
+
+	return NULL;
 }
 
 int
-lws_font_register(struct lws_context *cx, const lws_display_font_t *f)
+lws_font_register(struct lws_context *cx, const uint8_t *data, size_t data_len)
 {
-	lws_display_font_t *a = lws_malloc(sizeof(*a), __func__);
+	lws_display_font_t *a;
+
+	if (lws_ser_ru32be(data) != LWS_FOURCC('M', 'C', 'U', 'F'))
+		return 1;
+
+	a = lws_zalloc(sizeof(*a), __func__);
 	if (!a)
 		return 1;
 
-	*a = *f;
+	a->choice.family_name = (const char *)data +
+				lws_ser_ru32be(data + MCUFO_FOFS_FULLNAME);
+
+	if (castrstr(a->choice.family_name, "serif") ||
+	    castrstr(a->choice.family_name, "roman"))
+		a->choice.generic_name = "serif";
+	else
+		a->choice.generic_name = "sans";
+
+	if (castrstr(a->choice.family_name, "italic") ||
+	    castrstr(a->choice.family_name, "oblique"))
+		a->choice.style = 1;
+
+	if (castrstr(a->choice.family_name, "extrabold") ||
+	    castrstr(a->choice.family_name, "extra bold"))
+		a->choice.weight = 900;
+	else
+		if (castrstr(a->choice.family_name, "bold"))
+		    a->choice.weight = 700;
+		else
+			if (castrstr(a->choice.family_name, "extralight") ||
+			    castrstr(a->choice.family_name, "extra light"))
+				a->choice.weight = 200;
+			else
+				if (castrstr(a->choice.family_name, "light"))
+					a->choice.weight = 300;
+				else
+					a->choice.weight = 400;
+
+	a->choice.fixed_height = lws_ser_ru16be(data + MCUFO16_LINE_HEIGHT);
+
+	a->data = data;
+	a->data_len = data_len;
+	a->renderer = lws_display_font_mcufont_render;
+	a->image_glyph = lws_display_font_mcufont_image_glyph;
+
+	{
+		lws_dlo_text_t t;
+
+		memset(&t, 0, sizeof(t));
+		t.font = a;
+
+		lws_display_font_mcufont_getcwidth(&t, 'm', &a->em);
+		a->ex.whole = a->choice.fixed_height;
+		a->ex.frac = 0;
+	}
+
 	lws_dll2_clear(&a->list);
 	lws_dll2_add_tail(&a->list, &cx->fonts);
 
@@ -456,8 +343,8 @@ struct track {
 static int
 lws_fonts_score(struct lws_dll2 *d, void *user)
 {
-	const lws_display_font_t *f = lws_container_of(d,
-						lws_display_font_t, list);
+	const lws_display_font_t *f = lws_container_of(d, lws_display_font_t,
+						       list);
 	struct track *t = (struct track *)user;
 	struct lws_tokenize ts;
 	int score = 1000;
@@ -483,23 +370,24 @@ lws_fonts_score(struct lws_dll2 *d, void *user)
 					score -= 500;
 					break;
 				}
+
 			}
 
 		} while (ts.e > 0);
 	}
 
 	if (t->hints->weight)
-		score += 5 * (t->hints->weight > f->choice.weight ?
+		score += (t->hints->weight > f->choice.weight ?
 			(t->hints->weight - f->choice.weight) :
-			(f->choice.weight - t->hints->weight));
+			(f->choice.weight - t->hints->weight)) / 100;
 
 	if (t->hints->style != f->choice.style)
 		score += 100;
 
 	if (t->hints->fixed_height)
-		score += 10 * (100 - (t->hints->fixed_height > f->choice.fixed_height ?
+		score += 10 * (t->hints->fixed_height > f->choice.fixed_height ?
 				(t->hints->fixed_height - f->choice.fixed_height) :
-				(f->choice.fixed_height - t->hints->fixed_height)));
+				(f->choice.fixed_height - t->hints->fixed_height));
 
 	if (score < t->best_score) {
 		t->best_score = score;

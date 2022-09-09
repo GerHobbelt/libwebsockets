@@ -415,8 +415,21 @@ lws_ss_event_helper(lws_ss_handle_t *h, lws_ss_constate_t cs)
 
 	if (cs == LWSSSCS_CONNECTED)
 		h->ss_dangling_connected = 1;
-	if (cs == LWSSSCS_DISCONNECTED)
+	if (cs == LWSSSCS_DISCONNECTED) {
 		h->ss_dangling_connected = 0;
+
+		h->subseq = 0;
+		h->txn_ok = 0;
+		h->txn_resp_set = 0;
+		h->txn_resp_pending = 0;
+		h->hanging_som = 0;
+		h->inside_msg = 0;
+		h->inside_connect = 0;
+		h->proxy_onward = 0;
+		h->wsi = NULL;
+		h->u.http.good_respcode = 0;
+		h->seqstate = SSSEQ_IDLE;
+	}
 
 	if (h->info.state) {
 		h->h_in_svc = h;
@@ -608,7 +621,7 @@ lws_smd_ss_cb(void *opaque, lws_smd_class_t _class,
 	lws_ser_wu64be(p + 8, (uint64_t)timestamp);
 
 	if (h->info.rx)
-		h->info.rx((void *)&h[1], p, len + LWS_SMD_SS_RX_HEADER_LEN,
+		h->info.rx((void *)(h + 1), p, len + LWS_SMD_SS_RX_HEADER_LEN,
 		      LWSSS_FLAG_SOM | LWSSS_FLAG_EOM);
 
 	return 0;
@@ -628,7 +641,7 @@ lws_ss_smd_tx_cb(lws_sorted_usec_list_t *sul)
 	if (!h->info.tx)
 		return;
 
-	n = h->info.tx(&h[1], h->txord++, buf, &len, &flags);
+	n = h->info.tx(h + 1, h->txord++, buf, &len, &flags);
 	if (n)
 		/* nonzero return means don't want to send anything */
 		return;
@@ -1162,7 +1175,7 @@ lws_ss_create(struct lws_context *context, int tsi, const lws_ss_info_t *ssi,
 					 * How does the sink feel about us joining?
 					 */
 
-					if (sn->info.state(&h[1], h, LWSSSCS_SINK_JOIN,
+					if (sn->info.state(h + 1, h, LWSSSCS_SINK_JOIN,
 							    sn->accepts.count)) {
 						lwsl_ss_notice(h, "sink rejected");
 						goto fail_creation;
@@ -1205,7 +1218,7 @@ lws_ss_create(struct lws_context *context, int tsi, const lws_ss_info_t *ssi,
 		h->proxy_onward = 1;
 
 	/* start of overallocated area */
-	p = (char *)&h[1];
+	p = (char *)(h + 1);
 
 	/* set the handle pointer in the user data struct */
 	v = (void **)(p + ssi->handle_offset);
@@ -1486,7 +1499,7 @@ fail_creation:
 void *
 lws_ss_to_user_object(struct lws_ss_handle *h)
 {
-	return (void *)&h[1];
+	return (void *)(h + 1);
 }
 
 void
@@ -1742,7 +1755,7 @@ lws_ss_sink_txreq_cb(lws_sorted_usec_list_t *sul)
 	assert(h->sink_local_bind);
 
 	/* collect the source tx */
-	r = h->info.tx(&h[1], 0, buf + LWS_PRE, &size, &flags);
+	r = h->info.tx(h + 1, 0, buf + LWS_PRE, &size, &flags);
 	switch (r) {
 	case LWSSSSRET_OK:
 		if (!h->sink_local_bind->info.rx) {

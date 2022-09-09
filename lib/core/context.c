@@ -812,7 +812,6 @@ lws_create_context(const struct lws_context_creation_info *info)
 	context->lcg[LWSLCG_WSI_SSP_SOURCE].tag_prefix = "SSsrc";
 #endif
 
-
 #if defined(LWS_WITH_SECURE_STREAMS_STATIC_POLICY_ONLY)
 	/* directly use the user-provided policy object list */
 	context->pss_policies = info->pss_policies;
