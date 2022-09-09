@@ -1,5 +1,5 @@
 /*
- * Private register map for SSD1306
+ * SPI - esp32 esp-idf api implementation
  *
  * Copyright (C) 2019 - 2020 Andy Green <andy@warmcat.com>
  *
@@ -21,46 +21,32 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *
+ * This is like an abstract class for gpio, a real implementation provides
+ * functions for the ops that use the underlying OS gpio arrangements.
  */
 
-#if !defined(__LWS_SSD1306_H__)
-#define __LWS_SSD1306_H__
+#if defined(ESP_PLATFORM)
 
-enum {
-	SSD1306_SETLOWCOLUMN		= 0x00,
-	SSD1306_SETHIGHCOLUMN		= 0x10,
+#define lws_esp32_spi_ops \
+		.init		= lws_esp32_spi_init, \
+		.queue		= lws_esp32_spi_queue, \
+		.alloc_dma	= lws_esp32_spi_alloc_dma, \
+		.free_dma	= lws_esp32_spi_free_dma, \
+		.in_flight	= lws_esp32_spi_in_flight
 
-	SSD1306_MEMORYMODE		= 0x20,
-	SSD1306_COLUMNADDR		= 0x21,
-	SSD1306_PAGEADDR		= 0x22,
-	SSD1306_DEACTIVATE_SCROLL	= 0x2e,
+LWS_VISIBLE LWS_EXTERN int
+lws_esp32_spi_init(const lws_spi_ops_t *spi_ops);
 
-	SSD1306_SETSTARTLINE		= 0x40,
+LWS_VISIBLE LWS_EXTERN int
+lws_esp32_spi_queue(const lws_spi_ops_t *spi_ops, const lws_spi_desc_t *desc);
 
-	SSD1306_SETCONTRAST		= 0x81,
-	SSD1306_CHARGEPUMP		= 0x8d,
+LWS_VISIBLE LWS_EXTERN void *
+lws_esp32_spi_alloc_dma(const struct lws_spi_ops *ctx, size_t size);
 
-	SSD1306_SEGREMAP		= 0xa0,
-	SSD1306_SETSEGMENTREMAP		= 0xa1,
-	SSD1306_DISPLAYALLON_RESUME	= 0xa4,
-	SSD1306_DISPLAYALLON		= 0xa5,
-	SSD1306_NORMALDISPLAY		= 0xa6,
-	SSD1306_INVERTDISPLAY		= 0xa7,
-	SSD1306_SETMULTIPLEX		= 0xa8,
-	SSD1306_DISPLAYOFF	 	= 0xae,
-	SSD1306_DISPLAYON		= 0xaf,
+LWS_VISIBLE LWS_EXTERN void
+lws_esp32_spi_free_dma(const struct lws_spi_ops *ctx, void **p);
 
-	SSD1306_COMSCANINC		= 0xc0,
-	SSD1306_COMSCANDEC		= 0xc8,
-
-	SSD1306_SETDISPLAYOFFSET	= 0xd3,
-	SSD1306_SETDISPLAYCLOCKDIV	= 0xd5,
-	SSD1306_SETPRECHARGE		= 0xd9,
-	SSD1306_SETCOMPINS		= 0xda,
-	SSD1306_SETVCOMDESELECT		= 0xdb,
-
-	SSD1306_NOP			= 0xe3,
-};
+LWS_VISIBLE LWS_EXTERN int
+lws_esp32_spi_in_flight(const struct lws_spi_ops *ctx);
 
 #endif
-

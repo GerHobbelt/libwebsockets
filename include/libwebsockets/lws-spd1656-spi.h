@@ -1,5 +1,5 @@
 /*
- * Generic SPI
+ * lws abstract display implementation for epd-acep on spi
  *
  * Copyright (C) 2019 - 2022 Andy Green <andy@warmcat.com>
  *
@@ -22,36 +22,34 @@
  * IN THE SOFTWARE.
  */
 
-#include <libwebsockets.h>
-	
+#if !defined(__LWS_DISPLAY_SPD1656_SPI_H__)
+#define __LWS_DISPLAY_SPD1656_SPI_H__
+
+typedef struct lws_display_spd1656_spi {
+
+	lws_display_t		disp; /* use lws_display_spd1656_ops to set */
+	const lws_spi_ops_t	*spi;	      /* spi ops */
+
+	lws_display_completion_t	cb;
+
+	const lws_gpio_ops_t	*gpio;	      /* NULL or gpio ops */
+	_lws_plat_gpio_t	reset_gpio;   /* if gpio ops, nReset gpio # */
+	_lws_plat_gpio_t	busy_gpio;   /* if gpio ops, busy gpio # */
+
+	uint8_t			spi_index; /* cs index starting from 0 */
+
+} lws_display_spd1656_spi_t;
+
 int
-lws_spi_table_issue(const lws_spi_ops_t *spi_ops, uint32_t flags,
-		    const uint8_t *p, size_t len)
-{
-	lws_spi_desc_t desc;
-	size_t pos = 0;
+lws_display_spd1656_spi_init(lws_display_state_t *lds);
+int
+lws_display_spd1656_spi_blit(lws_display_state_t *lds, const uint8_t *src,
+			     lws_box_t *box, lws_dll2_owner_t *ids);
+int
+lws_display_spd1656_spi_power(lws_display_state_t *lds, int state);
 
-	memset(&desc, 0, sizeof(desc));
-	desc.count_cmd = 1;
-	desc.flags = flags;
-
-	while (pos < len) {
-
-		desc.count_write = p[pos++];
-
-		desc.src = (uint8_t *)&p[pos++];
-		if (desc.count_write)
-			desc.data = (uint8_t *)&p[pos];
-		else
-			desc.data = NULL;
-
-		if (spi_ops->queue(spi_ops, &desc) != ESP_OK) {
-			lwsl_err("%s: unable to queue\n", __func__);
-			return 1;
-		}
-
-		pos += desc.count_write;
-	}
-
-	return 0;
-}
+#define lws_display_spd1656_ops \
+	.init = lws_display_spd1656_spi_init, \
+	.blit = lws_display_spd1656_spi_blit, \
+	.power = lws_display_spd1656_spi_power
+#endif

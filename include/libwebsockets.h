@@ -687,6 +687,7 @@ lws_fx_string(const lws_fx_t *a, char *buf, size_t size);
 #include <libwebsockets/lws-metrics.h>
 #endif
 
+#include <libwebsockets/lws-ota.h>
 #include <libwebsockets/lws-system.h>
 #if defined(LWS_WITH_NETWORK)
 #include <libwebsockets/lws-ws-close.h>
@@ -774,6 +775,9 @@ lws_fx_string(const lws_fx_t *a, char *buf, size_t size);
 #endif
 #include <libwebsockets/lws-i2c.h>
 #include <libwebsockets/lws-spi.h>
+#if defined(LWS_ESP_PLATFORM)
+#include <libwebsockets/lws-esp32-spi.h>
+#endif
 #include <libwebsockets/lws-gpio.h>
 #include <libwebsockets/lws-bb-i2c.h>
 #include <libwebsockets/lws-bb-spi.h>
@@ -786,6 +790,9 @@ lws_fx_string(const lws_fx_t *a, char *buf, size_t size);
 #include <libwebsockets/lws-dlo.h>
 #include <libwebsockets/lws-ssd1306-i2c.h>
 #include <libwebsockets/lws-ili9341-spi.h>
+#include <libwebsockets/lws-spd1656-spi.h>
+#include <libwebsockets/lws-uc8176-spi.h>
+#include <libwebsockets/lws-ssd1675b-spi.h>
 #include <libwebsockets/lws-settings.h>
 #if defined(LWS_WITH_NETWORK)
 #include <libwebsockets/lws-netdev.h>
