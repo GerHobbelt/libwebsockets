@@ -50,6 +50,12 @@ enum lws_client_connect_ssl_connection_flags {
 	LCCSCF_HTTP_NO_FOLLOW_REDIRECT		= (1 << 12),
 	LCCSCF_HTTP_NO_CACHE_CONTROL		= (1 << 13),
 
+	LCCSCF_ALLOW_REUSE_ADDR				= (1 << 14),
+	/**< allow reuse local addresses in a bind call
+	 * When the listening socket is bound to INADDR_ANY with a specific port 
+	 * then it is not possible to bind to this port for any local address
+	 */
+
 	LCCSCF_PIPELINE				= (1 << 16),
 		/**< Serialize / pipeline multiple client connections
 		 * on a single connection where possible.
@@ -158,6 +164,9 @@ struct lws_client_connect_info {
 	 */
 	const char *iface;
 	/**< NULL to allow routing on any interface, or interface name or IP
+	 * to bind the socket to */
+	int local_port;
+	/**< 0 to pick an ephemeral port, or a specific local port
 	 * to bind the socket to */
 	const char *local_protocol_name;
 	/**< NULL: .protocol is used both to select the local protocol handler

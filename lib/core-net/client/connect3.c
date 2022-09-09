@@ -153,7 +153,7 @@ lws_client_connect_3_connect(struct lws *wsi, const char *ads,
 	struct sockaddr_un sau;
 #endif
 	struct lws_context_per_thread *pt = &wsi->a.context->pt[(int)wsi->tsi];
-	const char *cce = "Unable to connect", *iface;
+	const char *cce = "Unable to connect", *iface, *local_port;
 	const struct sockaddr *psa = NULL;
 	uint16_t port = wsi->conn_port;
 	char dcce[48], t16[16];
@@ -190,6 +190,10 @@ lws_client_connect_3_connect(struct lws *wsi, const char *ads,
 #endif
 		result = NULL;
 	}
+
+#if defined(LWS_WITH_UNIX_SOCK)
+	memset(&sau, 0, sizeof(sau));
+#endif
 
 	/*
 	 * async dns calls back here for everybody who cares when it gets a
@@ -254,10 +258,10 @@ lws_client_connect_3_connect(struct lws *wsi, const char *ads,
 	}
 
 #if defined(LWS_WITH_UNIX_SOCK)
+
 	if (ads && *ads == '+') {
 		ads++;
 		memset(&wsi->sa46_peer, 0, sizeof(wsi->sa46_peer));
-		memset(&sau, 0, sizeof(sau));
 		af = sau.sun_family = AF_UNIX;
 		strncpy(sau.sun_path, ads, sizeof(sau.sun_path));
 		sau.sun_path[sizeof(sau.sun_path) - 1] = '\0';
@@ -431,9 +435,12 @@ ads_known:
 		iface = lws_wsi_client_stash_item(wsi, CIS_IFACE,
 						  _WSI_TOKEN_CLIENT_IFACE);
 
-		if (iface && *iface) {
+		local_port = lws_wsi_client_stash_item(wsi, CIS_LOCALPORT,
+						  _WSI_TOKEN_CLIENT_LOCALPORT);
+
+		if ((iface && *iface) || (local_port && atoi(local_port))) {
 			m = lws_socket_bind(wsi->a.vhost, wsi, wsi->desc.sockfd,
-					    0, iface, af);
+					    (local_port ? atoi(local_port) : 0), iface, af);
 			if (m < 0) {
 				lws_snprintf(dcce, sizeof(dcce),
 					     "conn fail: socket bind");
