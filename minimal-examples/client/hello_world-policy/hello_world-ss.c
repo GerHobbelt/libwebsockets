@@ -1,7 +1,7 @@
 /*
  * hello_world example
  *
- * Written in 2010-2022 by Andy Green <andy@warmcat.com>
+ * Written in 2010-2021 by Andy Green <andy@warmcat.com>
  *
  * This file is made available under the Creative Commons CC0 1.0
  * Universal Public Domain Dedication.
@@ -10,6 +10,7 @@
  *
  *  - main.c:              boilerplate to create the lws_context and event loop
  *  - hello_world-ss.c:    (this file) the secure stream user code
+ *  - example-policy.json: the example policy
  */
 
 #include <libwebsockets.h>
@@ -63,7 +64,7 @@ hello_world_state(void *userobj, void *h_src, lws_ss_constate_t state,
 	return LWSSSSRET_OK;
 }
 
-LWS_SS_INFO("__default", hello_world_t)
+LWS_SS_INFO("sx-hello_world", hello_world_t)
 	.rx		= hello_world_rx,
 	.state		= hello_world_state,
 };
