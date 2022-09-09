@@ -82,20 +82,26 @@ if (LWS_WITH_DLO)
 		misc/dlo/dlo-font-mcufont.c
 		misc/dlo/dlo-text.c)
 
-if (LWS_WITH_UPNG)
-	list(APPEND SOURCES
-		misc/dlo/dlo-png.c)
-endif()
+	if (LWS_WITH_SECURE_STREAMS AND LWS_WITH_CLIENT)
+		list(APPEND SOURCES
+			misc/dlo/dlo-ss.c)
+	endif()
 
-if (LWS_WITH_JPEG)
-	list(APPEND SOURCES
-		misc/dlo/dlo-jpeg.c)
-endif()
+	if (LWS_WITH_UPNG)
+		list(APPEND SOURCES
+			misc/dlo/dlo-png.c)
+	endif()
 
-if (LWS_WITH_SECURE_STREAMS)
-	list(APPEND SOURCES
-		misc/dlo/dlo-ss.c)
-endif()
+	if (LWS_WITH_JPEG)
+		list(APPEND SOURCES
+			misc/dlo/dlo-jpeg.c)
+	endif()
+
+	if (LWS_WITH_LHP)
+		list(APPEND SOURCES
+			misc/dlo/dlo-lhp.c
+		)
+	endif()
 
 endif()  #dlo
 
@@ -164,6 +170,16 @@ if (LWS_WITH_CBOR)
 	list(APPEND SOURCES
 		misc/lecp.c
 		misc/ieeehalfprecision.c)
+endif()
+if (LWS_WITH_LHP)
+	list(APPEND SOURCES
+		misc/lhp.c)
+
+	if (LWS_WITH_SECURE_STREAMS)
+		list(APPEND SOURCES
+			misc/lhp-ss.c)
+	endif()
+
 endif()
 
 if (UNIX)
