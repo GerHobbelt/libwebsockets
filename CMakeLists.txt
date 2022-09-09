@@ -71,7 +71,10 @@ if (ESP_PLATFORM)
 endif()
 
 # it's at this point any toolchain file is brought in
-project(libwebsockets C CXX)
+project(libwebsockets C)
+if (LWS_WITH_SECURE_STREAMS_CPP)
+	enable_language(CXX)
+endif()
 include(CTest)
 
 if (PICO_SDK_PATH)
@@ -198,7 +201,7 @@ option(LWS_WITH_SSL "Include SSL support (defaults to OpenSSL or similar, mbedTL
 option(LWS_WITH_MBEDTLS "Use mbedTLS (>=2.0) replacement for OpenSSL. When setting this, you also may need to specify LWS_MBEDTLS_LIBRARIES and LWS_MBEDTLS_INCLUDE_DIRS" OFF)
 option(LWS_WITH_BORINGSSL "Use BoringSSL replacement for OpenSSL" OFF)
 option(LWS_WITH_CYASSL "Use CyaSSL replacement for OpenSSL. When setting this, you also need to specify LWS_CYASSL_LIBRARIES and LWS_CYASSL_INCLUDE_DIRS" OFF)
-option(LWS_WITH_WOLFSSL "Use wolfSSL replacement for OpenSSL. When setting this, you also need to specify LWS_WOLFSSL_LIBRARIES and LWS_WOLFSSL_INCLUDE_DIRS" OFF)
+option(LWS_WITH_WOLFSSL "Use wolfSSL replacement for OpenSSL. When setting this, you also may need to specify LWS_WOLFSSL_LIBRARIES and LWS_WOLFSSL_INCLUDE_DIRS" OFF)
 option(LWS_SSL_CLIENT_USE_OS_CA_CERTS "SSL support should make use of the OS-installed CA root certs" ON)
 option(LWS_TLS_LOG_PLAINTEXT_RX "For debugging log the received plaintext as soon as decrypted" OFF)
 option(LWS_TLS_LOG_PLAINTEXT_TX "For debugging log the transmitted plaintext just before encryption" OFF)
@@ -897,7 +900,11 @@ if (MSVC)
 	# Fail the build if any warnings
 	add_compile_options(/W3 /WX)
 	# Unbreak MSVC broken preprocessor __VA_ARGS__ behaviour
-	add_compile_options(/Zc:preprocessor /experimental:preprocessor /wd5105)
+	if (MSVC_VERSION GREATER 1925)
+		add_compile_options(/Zc:preprocessor /wd5105)
+	else()
+		add_compile_options(/experimental:preprocessor /wd5105)
+	endif()
 endif(MSVC)
 
 if (MINGW)
