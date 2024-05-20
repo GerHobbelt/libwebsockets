@@ -1,16 +1,15 @@
-project(lws-minimal-ws-broker C)
-cmake_minimum_required(VERSION 3.5)
+project(lws-minimal-raw-wol C)
+cmake_minimum_required(VERSION 3.6)
 find_package(libwebsockets CONFIG REQUIRED)
 list(APPEND CMAKE_MODULE_PATH ${LWS_CMAKE_DIR})
 include(CheckCSourceCompiles)
 include(LwsCheckRequirements)
 
-set(SAMP lws-minimal-ws-broker)
-set(SRCS minimal-ws-broker.c)
+set(SAMP lws-minimal-raw-wol)
+set(SRCS minimal-raw-wol.c)
 
 set(requirements 1)
-require_lws_config(LWS_ROLE_WS 1 requirements)
-require_lws_config(LWS_WITH_SERVER 1 requirements)
+require_lws_config(LWS_WITH_WOL 1 requirements)
 
 if (requirements)
 	add_executable(${SAMP} ${SRCS})

@@ -165,6 +165,7 @@
 #cmakedefine LWS_WITH_DLO
 #cmakedefine LWS_WITH_DRIVERS
 #cmakedefine LWS_WITH_ESP32
+#cmakedefine LWS_HAVE_NET_ETHERNET_H
 #cmakedefine LWS_HAVE_EVBACKEND_LINUXAIO
 #cmakedefine LWS_HAVE_EVBACKEND_IOURING
 #cmakedefine LWS_WITH_EXTERNAL_POLL
@@ -178,6 +179,7 @@
 #cmakedefine LWS_WITH_GZINFLATE
 #cmakedefine LWS_WITH_HTTP2
 #cmakedefine LWS_WITH_HTTP_BASIC_AUTH
+#cmakedefine LWS_WITH_HTTP_DIGEST_AUTH
 #cmakedefine LWS_WITH_HTTP_BROTLI
 #cmakedefine LWS_HTTP_HEADERS_ALL
 #cmakedefine LWS_WITH_HTTP_PROXY
