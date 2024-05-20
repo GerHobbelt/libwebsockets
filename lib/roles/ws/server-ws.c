@@ -27,7 +27,7 @@
 #define LWS_CPYAPP(ptr, str) { strcpy(ptr, str); ptr += strlen(str); }
 
 #if !defined(LWS_WITHOUT_EXTENSIONS)
-static int
+int
 lws_extension_server_handshake(struct lws *wsi, char **p, int budget)
 {
 	struct lws_context *context = wsi->a.context;
@@ -1080,7 +1080,7 @@ lws_parse_ws(struct lws *wsi, unsigned char **buf, size_t len)
 				   wsi->ws->rx_draining_ext);
 #endif
 			m = lws_ws_rx_sm(wsi, ALREADY_PROCESSED_IGNORE_CHAR |
-					      ALREADY_PROCESSED_NO_CB, 0);
+					      ALREADY_PROCESSED_NO_CB | ALREADY_PROCESSED_FULL_DRAINING, 0);
 		}
 
 		if (m < 0) {

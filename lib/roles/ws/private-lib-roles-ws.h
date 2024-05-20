@@ -75,6 +75,7 @@ enum lws_websocket_opcodes_07 {
 
 #define ALREADY_PROCESSED_IGNORE_CHAR 1
 #define ALREADY_PROCESSED_NO_CB 2
+#define ALREADY_PROCESSED_FULL_DRAINING 4
 
 #if !defined(LWS_WITHOUT_EXTENSIONS)
 struct lws_vhost_role_ws {
@@ -179,6 +180,8 @@ lws_ext_cb_active(struct lws *wsi, int reason, void *buf, int len);
 LWS_EXTERN int
 lws_ext_cb_all_exts(struct lws_context *context, struct lws *wsi, int reason,
 		    void *arg, int len);
+LWS_EXTERN int
+lws_extension_server_handshake(struct lws *wsi, char **p, int budget);
 #endif
 
 int
