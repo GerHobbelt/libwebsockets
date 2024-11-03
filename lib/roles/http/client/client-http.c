@@ -813,7 +813,7 @@ lws_http_digest_auth(struct lws* wsi)
 
 		tmp_digest = lws_malloc(l, __func__);
 		if (!tmp_digest)
-			return -1;
+			return LCBA_FAILED_AUTH;
 
 		n = lws_snprintf(tmp_digest, l, "%s:%s:%s",
 				 username, realm, password);
@@ -928,7 +928,7 @@ lws_http_digest_auth(struct lws* wsi)
 bail:
 	lws_free(tmp_digest);
 
-	return -1;
+	return LCBA_FAILED_AUTH;
 }
 #endif
 
@@ -1641,6 +1641,8 @@ lws_generate_client_handshake(struct lws *wsi, char *pkt)
 	//	if (!wsi->client_pipeline)
 	//		conn1 = "close, ";
 		p = lws_generate_client_ws_handshake(wsi, p, conn1);
+                if (!p)
+                    return NULL;
 	} else
 #endif
 	{
