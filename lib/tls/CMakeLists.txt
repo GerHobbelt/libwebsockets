@@ -51,8 +51,8 @@ set(LWS_WOLFSSL_LIBRARIES CACHE PATH "Path to the wolfSSL library" )
 set(LWS_WOLFSSL_INCLUDE_DIRS CACHE PATH "Path to the wolfSSL include directory" )
 
 
-if (LWS_WITH_BORINGSSL)
-	# boringssl deprecated EVP_PKEY
+if (LWS_WITH_BORINGSSL OR LWS_WITH_AWSLC)
+	# boringssl and aws-lc deprecated EVP_PKEY
 	set (LWS_WITH_GENHASH OFF PARENT_SCOPE)
 endif()
 
@@ -265,7 +265,7 @@ if (LWS_WITH_SSL)
 			set(OPENSSL_INCLUDE_DIRS "${OPENSSL_INCLUDE_DIR}")
 		endif()
 
-		if (NOT OPENSSL_FOUND AND NOT LWS_WITH_BORINGSSL)
+		if (NOT OPENSSL_FOUND AND NOT LWS_WITH_BORINGSSL AND NOT LWS_WITH_AWSLC)
 			# TODO: Add support for STATIC also.
 			if (NOT LWS_PLAT_FREERTOS)
 				find_package(PkgConfig QUIET)
@@ -513,14 +513,13 @@ if (GENCERTS)
                else()
 	
 		# Unix.
-		execute_process(
-			COMMAND printf "GB\\nErewhon\\nAll around\\nlibwebsockets-test\\n\\nlocalhost\\nnone@invalid.org\\n"
-			COMMAND "${OPENSSL_EXECUTABLE}"
-				req -new -newkey rsa:2048 -days 10000 -nodes -x509 -keyout "${TEST_SERVER_SSL_KEY}" -out "${TEST_SERVER_SSL_CERT}"
-			RESULT_VARIABLE OPENSSL_RETURN_CODE
-			#		OUTPUT_QUIET ERROR_QUIET
-			)
-			
+               execute_process(
+                       COMMAND printf "GB\\nErewhon\\nAll around\\nlibwebsockets-test\\n\\nlocalhost\\nnone@invalid.org\\n"
+                       COMMAND "${OPENSSL_EXECUTABLE}"
+                               req -config /etc/ssl/openssl.cnf -new -newkey rsa:2048 -days 10000 -nodes -x509 -keyout "${TEST_SERVER_SSL_KEY}" -out "${TEST_SERVER_SSL_CERT}"
+                       RESULT_VARIABLE OPENSSL_RETURN_CODE
+                       #               OUTPUT_QUIET ERROR_QUIET
+                       )
 		endif()
 
 		if (OPENSSL_RETURN_CODE)
